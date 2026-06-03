@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Node Portal - ROWA-A Distributed System</title>
+
+  <!-- CDN DEPENDENCIES -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Google Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f8fafc;
+      color: #334155;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+
+    /* Dynamic Glow Effects */
+    .glow-theme { box-shadow: 0 8px 20px -5px var(--theme-glow, rgba(59,130,246,0.2)), 0 4px 10px -3px var(--theme-glow, rgba(59,130,246,0.1)); }
+    .bg-theme-grad { background-image: linear-gradient(to right, var(--theme-color-dark), #ffffff); }
+    .text-theme { color: var(--theme-color); }
+    .border-theme { border-color: var(--theme-color); }
+    .btn-theme { 
+        background: linear-gradient(to right, var(--theme-color), var(--theme-color-hover)); 
+        box-shadow: 0 4px 12px var(--theme-glow);
+    }
+    .btn-theme:hover { filter: brightness(1.05); }
+
+    @keyframes pulse-border {
+      0%,100% { box-shadow: 0 0 0 0 rgba(234,179,8,0.6), 0 0 10px rgba(234,179,8,0.1); }
+      50%     { box-shadow: 0 0 0 4px rgba(234,179,8,0.1),  0 0 20px rgba(234,179,8,0.3); }
+    }
+    .recovering-pulse { animation: pulse-border 1.2s ease infinite; }
+
+    .grid-bg {
+      background-image:
+        linear-gradient(rgba(148,163,184,0.15) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148,163,184,0.15) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius:3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+    .node-up       { border-color: rgba(34,197,94,0.4);  }
+    .node-down     { border-color: rgba(239,68,68,0.4);  }
+    .node-recovering{ border-color: rgba(234,179,8,0.5); }
+    
+    @keyframes slideIn { from {opacity:0; transform:translateY(-10px);} to {opacity:1; transform:translateY(0);} }
+    .animate-slide-in { animation: slideIn 0.4s ease-out forwards; }
+  </style>
+
+</head>
+<body class="grid-bg">
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+// Global settings
+const COORDINATOR_URL = "http://localhost:5000";
+
+const THEMES = {
+    "A": { color: "#3b82f6", hover: "#2563eb", dark: "rgba(59,130,246,0.05)", glow: "rgba(59,130,246,0.2)" }, // Blue
+    "B": { color: "#8b5cf6", hover: "#7c3aed", dark: "rgba(139,92,246,0.05)", glow: "rgba(139,92,246,0.2)" }, // Purple
+    "C": { color: "#ec4899", hover: "#db2777", dark: "rgba(236,72,153,0.05)", glow: "rgba(236,72,153,0.2)" }, // Pink
+    "DEFAULT": { color: "#10b981", hover: "#059669", dark: "rgba(16,185,129,0.05)", glow: "rgba(16,185,129,0.2)" }
+};
+
+const NodePortal = () => {
+    const [nodeId, setNodeId] = useState("?");
+    const [status, setStatus] = useState("UP");
+    const [dataset, setDataset] = useState([]);
+    const [wal, setWal] = useState([]);
+    const [lastTx, setLastTx] = useState(0);
+    const [progress, setProgress] = useState(0);
+    const [txAmt, setTxAmt] = useState(5);
+    const [selectedSku, setSelectedSku] = useState("sku001");
+    const [uiMsg, setUiMsg] = useState(null); // Message for local UI
+    
+    const showUiMsg = (type, text) => {
+        setUiMsg({ type, text });
+        setTimeout(() => setUiMsg(null), 5000);
+    };
+
+    const fetchState = async () => {
+        try {
+            const res = await fetch("/api/status");
+            if(res.status === 503) {
+                setStatus("DOWN");
+                return; // Can't fetch details if down
+            }
+            if (res.ok) {
+                const data = await res.json();
+                setNodeId(data.node_id);
+                setStatus(data.status);
+                setDataset(data.dataset || []);
+                setLastTx(data.lastTxId);
+                setProgress(data.recoverProgress || 0);
+            }
+            
+            const walRes = await fetch("/api/wal");
+            if (walRes.ok) {
+                const walData = await walRes.json();
+                setWal(walData.wal || []);
+            }
+        } catch(e) {
+            console.error("Error fetching state:", e);
+        }
+    };
+
+    useEffect(() => {
+        fetchState();
+        const interval = setInterval(fetchState, 1000);
+        return () => clearInterval(interval);
+    }, []);
+
+    // Update CSS variables based on Node ID
+    useEffect(() => {
+        const theme = THEMES[nodeId] || THEMES["DEFAULT"];
+        document.documentElement.style.setProperty('--theme-color', theme.color);
+        document.documentElement.style.setProperty('--theme-color-hover', theme.hover);
+        document.documentElement.style.setProperty('--theme-color-dark', theme.dark);
+        document.documentElement.style.setProperty('--theme-glow', theme.glow);
+        document.title = `Warehouse ${nodeId} - Portal`;
+    }, [nodeId]);
+
+    const isUp = status === 'UP' || status === 'SYNCED';
+    const isDown = status === 'DOWN';
+    const isRecovering = status === 'RECOVERING';
+
+    const handleWrite = async () => {
+        if (isDown) return showUiMsg('error', '💥 Node đang DOWN - Không thể kết nối!');
+        if (isRecovering) return showUiMsg('warning', '⚠️ KHÔNG THỂ GHI TRỰC TIẾP: Node đang RECOVERING. Mọi yêu cầu ghi mới đều bị chặn để đảm bảo nhất quán. Vui lòng gửi yêu cầu ghi qua Coordinator để hệ thống tự điều phối.');
+        
+        try {
+            // Fix Lost Update: Send delta instead of absolute new value
+            const res = await fetch(`${COORDINATOR_URL}/api/write`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sku: selectedSku, delta: txAmt })
+            });
+            if(res.ok) {
+                showUiMsg('success', '✅ Đã gửi yêu cầu Ghi thành công qua Coordinator');
+                fetchState();
+            } else {
+                showUiMsg('error', "❌ Write failed: " + await res.text());
+            }
+        } catch (e) {
+            showUiMsg('error', "❌ Error: " + e.message);
+        }
+    };
+
+    const handleCrash = async () => {
+        try {
+            await fetch("/crash", { method: 'POST' });
+            fetchState();
+        } catch (e) { console.error(e); }
+    };
+
+    const handleRecover = async () => {
+        try {
+            await fetch("/recover", { method: 'POST' });
+            fetchState();
+        } catch (e) { console.error(e); }
+    };
+
+    const getStatusBadge = () => {
+        if(isUp) return <div className="px-3 py-1 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 font-bold text-sm flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div> ONLINE</div>;
+        if(isDown) return <div className="px-3 py-1 rounded-full border border-red-200 bg-red-50 text-red-700 font-bold text-sm flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-red-500"></div> OFFLINE</div>;
+        if(isRecovering) return <div className="px-3 py-1 rounded-full border border-yellow-200 bg-yellow-50 text-yellow-700 font-bold text-sm flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-yellow-500"></div> RECOVERING... {Math.round(progress)}%</div>;
+    };
+
+    return (
+        <div className="min-h-screen p-4 md:p-8 flex flex-col items-center">
+            
+            {/* Top Navigation Links */}
+            <div className="w-full max-w-6xl flex justify-between items-center mb-8 bg-white shadow-sm p-2 px-4 rounded-xl border border-slate-200 backdrop-blur">
+                <div className="flex gap-2">
+                    <a href="http://localhost:5000" className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-700 text-sm font-bold transition-colors">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                        Back to Global Control Center
+                    </a>
+                </div>
+                <div className="flex gap-2">
+                    <span className="px-4 py-1.5 rounded-lg text-sm font-bold border bg-slate-800 border-slate-800 text-white shadow-sm">
+                        Cổng Kho {nodeId}
+                    </span>
+                </div>
+            </div>
+
+            <div className="w-full max-w-6xl animate-slide-in">
+                {/* Header */}
+                <div className={`w-full rounded-2xl border border-slate-200 bg-white shadow-sm p-6 mb-6 flex justify-between items-center ${isUp ? 'glow-theme' : isRecovering ? 'recovering-pulse' : 'border-red-200 glow-red'}`}>
+                    <div className="flex items-center gap-4">
+                        <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl font-black bg-theme-grad border border-slate-200 text-slate-800 shadow-sm">
+                            {nodeId}
+                        </div>
+                        <div>
+                            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Kho <span className="text-theme">{nodeId}</span></h1>
+                            <p className="text-slate-500 font-mono text-sm mt-1 font-medium">Cổng Máy chủ Cục bộ (Port 500{nodeId === 'A' ? 1 : nodeId === 'B' ? 2 : 3})</p>
+                        </div>
+                    </div>
+                    <div>{getStatusBadge()}</div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Left Column: Controls */}
+                    <div className="space-y-6">
+                        {/* Status Controls */}
+                        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 shadow-sm">
+                            <h2 className="text-sm font-bold uppercase tracking-widest text-slate-500 mb-4">Quản lý Vòng đời Kho</h2>
+                            <div className="grid grid-cols-2 gap-3">
+                                <button onClick={handleCrash} disabled={!isUp} className="py-2.5 rounded-lg bg-red-50 border border-red-200 text-red-600 font-semibold hover:bg-red-100 disabled:opacity-50 transition-colors shadow-sm">
+                                    Tắt Server
+                                </button>
+                                <button onClick={handleRecover} disabled={!isDown} className="py-2.5 rounded-lg bg-yellow-50 border border-yellow-200 text-yellow-600 font-semibold hover:bg-yellow-100 disabled:opacity-50 transition-colors shadow-sm">
+                                    Mở Server
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Inventory Writer */}
+                        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 shadow-sm">
+                            <h2 className="text-sm font-bold uppercase tracking-widest text-slate-500 mb-4">Giao dịch Ghi</h2>
+                            
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-xs text-slate-600 font-bold uppercase mb-1 block">Chọn mặt hàng (SKU)</label>
+                                    <select value={selectedSku} onChange={e=>setSelectedSku(e.target.value)} disabled={!isUp} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-slate-800 mono font-semibold text-sm outline-none focus:border-theme shadow-sm">
+                                        {dataset.map(item => (
+                                            <option key={item.SKU} value={item.SKU}>{item.SKU} (Tồn kho: {item.Quantity})</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="text-xs text-slate-600 font-bold uppercase mb-1 block">Số lượng thay đổi (Delta)</label>
+                                    <div className="flex gap-2">
+                                        <button onClick={()=>setTxAmt(p=>p-1)} className="w-11 h-11 rounded-lg bg-white border border-slate-300 flex items-center justify-center hover:bg-slate-50 transition-colors font-bold text-slate-700 shadow-sm">-</button>
+                                        <input type="number" value={txAmt} onChange={e=>setTxAmt(parseInt(e.target.value)||0)} className="flex-1 bg-white border border-slate-300 rounded-lg text-center text-slate-800 mono font-bold text-lg outline-none focus:border-theme shadow-sm"/>
+                                        <button onClick={()=>setTxAmt(p=>p+1)} className="w-11 h-11 rounded-lg bg-white border border-slate-300 flex items-center justify-center hover:bg-slate-50 transition-colors font-bold text-slate-700 shadow-sm">+</button>
+                                    </div>
+                                </div>
+
+                                <button onClick={handleWrite} className="w-full py-3 rounded-xl btn-theme text-white font-bold tracking-wide transition-all uppercase text-sm mt-3">
+                                    Thực hiện Ghi
+                                </button>
+                                
+                                {uiMsg && (
+                                    <div className={`mt-3 p-3 rounded-lg text-sm font-medium animate-slide-in ${
+                                        uiMsg.type === 'error' ? 'bg-red-100 text-red-700 border border-red-200' : 
+                                        uiMsg.type === 'warning' ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' :
+                                        'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                                    }`}>
+                                        {uiMsg.text}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Middle Column: Local Database */}
+                    <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-5 flex flex-col h-[600px]">
+                        <div className="flex justify-between items-end mb-4">
+                            <div>
+                                <h2 className="text-sm font-bold uppercase tracking-widest text-slate-500">Cơ sở Dữ liệu Cục bộ</h2>
+                                <p className="text-xs text-slate-500 mt-1 font-medium">Bản sao bộ nhớ ({dataset.length} mặt hàng)</p>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-xs text-slate-500 font-bold">Giao dịch cuối</p>
+                                <p className="mono font-bold text-theme">TX-{String(lastTx).padStart(3, '0')}</p>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto pr-2">
+                            <table className="w-full text-left border-collapse">
+                                <thead className="sticky top-0 bg-white/95 backdrop-blur z-10 text-xs uppercase text-slate-500 font-bold border-b border-slate-200">
+                                    <tr>
+                                        <th className="pb-2">SKU</th>
+                                        <th className="pb-2 text-right">Số lượng</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {dataset.length === 0 ? (
+                                        <tr><td colSpan="2" className="text-center py-8 text-slate-400 italic font-medium">Không có dữ liệu (Offline)</td></tr>
+                                    ) : (
+                                        dataset.slice(0, 50).map(item => (
+                                            <tr key={item.SKU} className="border-b border-slate-100 hover:bg-slate-50 transition-colors group">
+                                                <td className="py-2.5 mono text-sm font-bold text-slate-600 group-hover:text-slate-900">{item.SKU}</td>
+                                                <td className="py-2.5 mono text-sm text-right font-bold text-emerald-600">{item.Quantity}</td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* Right Column: Local WAL */}
+                    <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-5 flex flex-col h-[600px]">
+                        <div>
+                            <h2 className="text-sm font-bold uppercase tracking-widest text-slate-500">Nhật ký Ghi chú (WAL)</h2>
+                            <p className="text-xs text-slate-500 mt-1 font-medium">wal.jsonl ({wal.length} bản ghi)</p>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto mt-4 space-y-2 pr-2">
+                            {wal.length === 0 ? (
+                                <div className="text-center py-8 text-slate-400 italic font-medium">Nhật ký trống</div>
+                            ) : (
+                                [...wal].reverse().map((entry, idx) => (
+                                    <div key={idx} className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs mono shadow-sm">
+                                        <div className="flex justify-between items-center mb-1">
+                                            <span className="font-bold text-theme">TX-{String(entry.tx_id).padStart(3, '0')}</span>
+                                            <span className="text-slate-500 font-medium">{new Date(entry.timestamp * 1000).toLocaleTimeString()}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between mt-2">
+                                            <span className="text-slate-700 font-bold">{entry.sku}</span>
+                                            <div className="flex gap-2 items-center">
+                                                <span className="text-slate-400 line-through font-semibold">{entry.old_qty}</span>
+                                                <span className="text-emerald-500">→</span>
+                                                <span className="text-emerald-600 font-bold">{entry.new_qty}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<NodePortal />);
+</script>
+</body>
+</html>

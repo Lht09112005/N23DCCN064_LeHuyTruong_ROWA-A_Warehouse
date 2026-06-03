@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Global Control Center - ROWA-A Distributed System</title>
+  <meta name="description" content="Web Simulator for ROWA-A (Read One Write All Available) Distributed Database Protocol - Warehouse Inventory Demo"/>
+
+  <!-- CDN DEPENDENCIES -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Google Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f8fafc;
+      color: #334155;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+
+    .glow-blue  { box-shadow: 0 10px 25px -5px rgba(59,130,246,0.3), 0 8px 10px -6px rgba(59,130,246,0.2); }
+    .glow-green { box-shadow: 0 10px 25px -5px rgba(34,197,94,0.3),  0 8px 10px -6px rgba(34,197,94,0.2); }
+    .glow-red   { box-shadow: 0 10px 25px -5px rgba(239,68,68,0.3),  0 8px 10px -6px rgba(239,68,68,0.2); }
+    .glow-yellow{ box-shadow: 0 10px 25px -5px rgba(234,179,8,0.3),  0 8px 10px -6px rgba(234,179,8,0.2); }
+
+    @keyframes pulse-border {
+      0%,100% { box-shadow: 0 0 0 0 rgba(234,179,8,0.6), 0 0 10px rgba(234,179,8,0.1); }
+      50%      { box-shadow: 0 0 0 4px rgba(234,179,8,0.1),  0 0 20px rgba(234,179,8,0.3); }
+    }
+    .recovering-pulse { animation: pulse-border 1.2s ease infinite; }
+
+    @keyframes spin { from {transform:rotate(0deg)} to {transform:rotate(360deg)} }
+    .spin { animation: spin 1s linear infinite; }
+
+    .grid-bg {
+      background-image:
+        linear-gradient(rgba(148,163,184,0.15) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148,163,184,0.15) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+
+    @keyframes slideIn {
+      from { opacity:0; transform: translateX(-12px); }
+      to   { opacity:1; transform: translateX(0); }
+    }
+    .log-item { animation: slideIn 0.3s ease; }
+
+    @keyframes toastIn {
+      from { opacity:0; transform: translateY(-30px) scale(0.95); }
+      to   { opacity:1; transform: translateY(0) scale(1); }
+    }
+    @keyframes toastOut {
+      from { opacity:1; transform: translateY(0) scale(1); }
+      to   { opacity:0; transform: translateY(-20px) scale(0.95); }
+    }
+    .toast-enter { animation: toastIn  0.35s cubic-bezier(0.34,1.56,0.64,1); }
+    .toast-leave { animation: toastOut 0.3s ease forwards; }
+
+    ::-webkit-scrollbar       { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius:3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+    .btn-scale { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+    .btn-scale:hover:not(:disabled) { transform: translateY(-1px); }
+    .btn-scale:active:not(:disabled){ transform: translateY(0px); }
+
+    .node-up       { border-color: rgba(34,197,94,0.4);  }
+    .node-down     { border-color: rgba(239,68,68,0.4);  }
+    .node-recovering{ border-color: rgba(234,179,8,0.5); }
+
+    /* Light Theme Terminal Colors (kept slightly dark for terminal feel but adjusted) */
+    .t-info    { color: #3b82f6; }
+    .t-success { color: #10b981; }
+    .t-warning { color: #f59e0b; }
+    .t-error   { color: #ef4444; }
+    .t-system  { color: #8b5cf6; }
+    .t-gray    { color: #64748b; }
+  </style>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 500:'#3b82f6', 400:'#60a5fa', 300:'#93c5fd' },
+          }
+        }
+      }
+    }
+  </script>
+</head>
+
+<body class="grid-bg">
+<div id="root"></div>
+
+<script type="text/babel">
+/* ═════════════════════════════════════════════════════════════════════════════
+   ROWA-A Warehouse Inventory Web Simulator (Docker Connected Version)
+   ═════════════════════════════════════════════════════════════════════════════ */
+
+const { useState, useEffect, useRef, useCallback } = React;
+
+const SKU               = "sku001";
+const INITIAL_QTY       = 223;
+
+const NodeStatus = { UP: 'UP', DOWN: 'DOWN', RECOVERING: 'RECOVERING' };
+
+const ts = () => new Date().toLocaleTimeString('vi-VN', { hour12: false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+const txLabel = (id) => id > 0 ? `TX-${String(id).padStart(3,'0')}` : '—';
+const randQty  = (base) => Math.floor(base + (Math.random()*160 - 30));
+
+/* ─── STATUS BADGE ───────────────────────────────────────────────────────── */
+const StatusBadge = ({ status }) => {
+  const cfg = {
+    [NodeStatus.UP]:         { bg:'bg-emerald-50', text:'text-emerald-700', border:'border-emerald-200', label:'UP',         dot:'bg-emerald-500' },
+    [NodeStatus.DOWN]:       { bg:'bg-red-50',     text:'text-red-700',     border:'border-red-200',     label:'DOWN',       dot:'bg-red-500' },
+    [NodeStatus.RECOVERING]: { bg:'bg-yellow-50',  text:'text-yellow-700',  border:'border-yellow-200',  label:'RECOVERING', dot:'bg-yellow-500' },
+  }[status] || { bg:'bg-red-50', text:'text-red-700', border:'border-red-200', label:'DOWN', dot:'bg-red-500' };
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border mono ${cfg.bg} ${cfg.text} ${cfg.border}`}>
+      <span className={`w-2 h-2 rounded-full ${cfg.dot} ${status === NodeStatus.UP ? 'animate-pulse' : ''}`}/>
+      {cfg.label}
+    </span>
+  );
+};
+
+/* ─── NODE CARD ──────────────────────────────────────────────────────────── */
+const NodeCard = ({ node, selectedSku, onCrash, onRestart, onRead, onWrite }) => {
+  const isUp         = node.status === NodeStatus.UP || node.status === 'SYNCED';
+  const isDown       = node.status === NodeStatus.DOWN;
+  const isRecovering = node.status === NodeStatus.RECOVERING;
+  const [txAmt, setTxAmt] = useState(-7);
+
+  const getSkuQuantity = () => {
+    if (isDown) return '—';
+    if (!node.dataset || !Array.isArray(node.dataset)) {
+      return node.quantity; // fallback to Laptop quantity
+    }
+    const item = node.dataset.find(i => i.SKU === selectedSku);
+    return item ? item.Quantity : 0;
+  };
+
+  const borderClass = isUp ? 'node-up' : isDown ? 'node-down' : 'node-recovering recovering-pulse';
+  const glowClass   = isUp ? 'glow-green' : isDown ? 'glow-red' : 'glow-yellow';
+
+  const headerGrad = isUp
+    ? 'from-emerald-50 to-white border-b border-emerald-100'
+    : isDown
+    ? 'from-red-50 to-white border-b border-red-100'
+    : 'from-yellow-50 to-white border-b border-yellow-100';
+
+  const nodeColors = { A: '#3b82f6', B: '#8b5cf6', C: '#ec4899' };
+
+  return (
+    <div className={`relative rounded-2xl border bg-white shadow-sm overflow-hidden transition-all duration-500 ${borderClass} ${glowClass}`}>
+      {/* Header */}
+      <div className={`bg-gradient-to-r ${headerGrad} px-5 py-4 flex items-center justify-between`}>
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl flex items-center justify-center font-black text-xl"
+               style={{background: `${nodeColors[node.node_id]}15`, border: `1px solid ${nodeColors[node.node_id]}33`, color: nodeColors[node.node_id]}}>
+            {node.node_id}
+          </div>
+          <div>
+            <div className="font-bold text-slate-800 text-sm">Warehouse {node.node_id}</div>
+            <div className="text-xs text-slate-500 mono">Database Replica {node.node_id}</div>
+          </div>
+        </div>
+        <StatusBadge status={node.status === 'SYNCED' ? 'UP' : node.status}/>
+      </div>
+
+      {/* Recovery Progress Bar */}
+      {isRecovering && (
+        <div className="px-5 pt-3">
+          <div className="flex justify-between text-xs text-yellow-600 mb-1 mono font-medium">
+            <span>Đang đọc Recovery Log...</span>
+            <span>{Math.round(node.recoverProgress || 0)}%</span>
+          </div>
+          <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-yellow-400 to-amber-500 rounded-full transition-all duration-200"
+                 style={{width: `${node.recoverProgress || 0}%`}}/>
+          </div>
+        </div>
+      )}
+
+      {/* Stock Data */}
+      <div className="px-5 pt-4">
+        <div className="bg-slate-50 rounded-xl p-4 space-y-3 border border-slate-200">
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-slate-500 uppercase tracking-widest font-semibold">SKU</div>
+            <div className="mono text-sm font-bold text-blue-600">{selectedSku}</div>
+          </div>
+
+          <div className="text-center py-2">
+            <div className="text-4xl font-black mono"
+                 style={{color: isDown ? '#ef4444' : isRecovering ? '#d97706' : '#10b981'}}>
+              {getSkuQuantity()}
+            </div>
+            <div className="text-xs text-slate-500 mt-1 font-medium">Sản phẩm Tồn kho</div>
+          </div>
+
+          <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+            <div className="text-xs text-slate-500 font-medium">Giao dịch cuối</div>
+            <div className={`mono text-xs font-bold px-2 py-0.5 rounded ${node.lastTxId > 0 ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-600'}`}>
+              {txLabel(node.lastTxId)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="px-5 pb-5">
+        <a href={`http://localhost:500${node.node_id === 'A' ? 1 : node.node_id === 'B' ? 2 : 3}`} 
+           target="_blank" rel="noreferrer"
+           className="w-full flex items-center justify-center gap-2 px-3 py-3 rounded-xl text-xs font-bold border border-slate-200 bg-white hover:bg-slate-50 hover:text-slate-900 text-slate-700 shadow-sm transition-colors btn-scale mt-3">
+          <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+          <span>Mở Giao diện Riêng Kho {node.node_id}</span>
+        </a>
+      </div>
+    </div>
+  );
+};
+
+/* ─── TOAST NOTIFICATION ─────────────────────────────────────────────────── */
+const Toast = ({ toast, onDismiss }) => {
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(onDismiss, 5500);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  if (!toast) return null;
+
+  const cfg = {
+    error:   { bg:'bg-red-950',    border:'border-red-500',   icon:'🚨', textColor:'text-red-100' },
+    success: { bg:'bg-green-950',  border:'border-green-500', icon:'✅', textColor:'text-green-100' },
+    warning: { bg:'bg-yellow-950', border:'border-yellow-500',icon:'⚠️',  textColor:'text-yellow-100' },
+    info:    { bg:'bg-blue-950',   border:'border-blue-500',  icon:'ℹ️',  textColor:'text-blue-100' },
+  }[toast.type] || {};
+
+  return (
+    <div className={`toast-enter fixed top-5 left-1/2 -translate-x-1/2 z-50 max-w-xl w-full mx-4 
+        ${cfg.bg} border-2 ${cfg.border} rounded-2xl shadow-2xl p-4 flex items-start gap-3`}>
+      <span className="text-2xl flex-shrink-0 mt-0.5">{cfg.icon}</span>
+      <div className="flex-1">
+        <div className={`font-bold text-sm ${cfg.textColor}`}>{toast.title}</div>
+        <div className="text-xs mt-1 text-slate-300 leading-relaxed">{toast.message}</div>
+      </div>
+      <button onClick={onDismiss} className="text-slate-400 hover:text-white text-lg leading-none flex-shrink-0">×</button>
+    </div>
+  );
+};
+
+/* ─── TERMINAL LOG LINE ──────────────────────────────────────────────────── */
+const TermLine = ({ entry }) => {
+  const typeClass = {
+    info: 't-info', success: 't-success', warning: 't-warning',
+    error: 't-error', system: 't-system', gray: 't-gray',
+  }[entry.type] || 't-info';
+
+  return (
+    <div className={`log-item mono text-xs leading-relaxed ${typeClass}`}>
+      <span className="t-gray select-none">[{entry.time}] </span>
+      {entry.label && <span className="text-purple-400">[{entry.label}] </span>}
+      {entry.msg}
+    </div>
+  );
+};
+
+/* ─── RECOVERY LOG PANEL ─────────────────────────────────────────────────── */
+const RecoveryLogPanel = ({ entries }) => (
+  <div className="bg-white border border-slate-200 shadow-sm rounded-2xl overflow-hidden h-full flex flex-col">
+    <div className="px-4 py-3 bg-gradient-to-r from-amber-50 to-white border-b border-slate-100 flex items-center gap-2">
+      <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+      <span className="text-sm font-bold text-amber-800">Recovery Log</span>
+      <span className="ml-auto mono text-xs text-slate-600 bg-amber-100/50 border border-amber-200/50 px-2 py-0.5 rounded-full font-medium">
+        {entries.length} entries
+      </span>
+    </div>
+    <div className="flex-1 overflow-y-auto p-3 space-y-1.5 min-h-0 bg-slate-50/50">
+      {entries.length === 0 ? (
+        <div className="text-center py-8 text-slate-400 text-xs mono font-medium">Chưa có entry nào</div>
+      ) : (
+        entries.map((e, i) => (
+          <div key={i} className="log-item bg-white border border-slate-200 shadow-sm rounded-lg px-3 py-2">
+            <div className="flex items-center justify-between mb-1">
+              <span className="mono text-xs font-bold text-amber-600">{txLabel(e.txId)}</span>
+              <span className="mono text-xs text-slate-400">{e.time}</span>
+            </div>
+            <div className="mono text-xs text-slate-600 font-medium">
+              {e.sku || 'sku001'}: <span className="text-red-500">{e.oldQty}</span>
+              <span className="text-slate-400"> → </span>
+              <span className="text-emerald-600">{e.newQty}</span>
+            </div>
+            <div className="mono text-xs text-slate-500 mt-1">
+              Missed by: {e.missedBy.map(n => (
+                <span key={n} className="inline-block bg-red-50 text-red-600 border border-red-200 font-bold rounded px-1 mr-1">{n}</span>
+              ))}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  </div>
+);
+
+/* ═════════════════════════════════════════════════════════════════════════════
+   MAIN APP
+   ═════════════════════════════════════════════════════════════════════════════ */
+function App() {
+  const [nodes, setNodes]             = useState({
+    A: { node_id: 'A', status: 'DOWN', quantity: 0, lastTxId: 0, recoverProgress: 0 },
+    B: { node_id: 'B', status: 'DOWN', quantity: 0, lastTxId: 0, recoverProgress: 0 },
+    C: { node_id: 'C', status: 'DOWN', quantity: 0, lastTxId: 0, recoverProgress: 0 }
+  });
+  const [txCounter, setTxCounter]     = useState(0);
+  const [recoveryLog, setRecoveryLog] = useState([]);
+  const [termLog, setTermLog]         = useState([]);
+  const [toast, setToast]             = useState(null);
+  const [selectedSku, setSelectedSku] = useState("sku001");
+  const [globalAmount, setGlobalAmount] = useState(-7);
+
+  const termRef    = useRef(null);
+  const prevStatuses = useRef({}); // Ref to avoid toast flood on polling
+
+  useEffect(() => {
+    if (termRef.current) {
+      termRef.current.scrollTop = termRef.current.scrollHeight;
+    }
+  }, [termLog]);
+
+  const addLog = useCallback((msg, type = 'info', label = null) => {
+    setTermLog(prev => [...prev.slice(-199), { msg, type, label, time: ts() }]);
+  }, []);
+
+  const showToast = useCallback((type, title, message) => {
+    setToast({ type, title, message });
+  }, []);
+
+  /* ─── FETCH POLLING FOR REAL STATUS ──────────────────────────────────── */
+  const fetchStatus = useCallback(async (isInitial = false) => {
+    try {
+      const res = await fetch('/api/status');
+      if (res.ok) {
+        const data = await res.json();
+        setNodes(data.nodes);
+        setTxCounter(data.txCounter);
+        setRecoveryLog(data.recoveryLog);
+
+        if (isInitial) {
+          addLog("📡 Đồng bộ trạng thái từ Coordinator thành công!", "success", "SYSTEM");
+        }
+
+        // Show toasts automatically when a node finishes recovery in background
+        Object.keys(data.nodes).forEach(id => {
+          const oldSt = prevStatuses.current[id];
+          const newSt = data.nodes[id].status;
+
+          if (oldSt === 'RECOVERING' && (newSt === 'UP' || newSt === 'SYNCED')) {
+            showToast('success',
+              `✅ Node ${id} đã Recovery thành công!`,
+              `Đã replay nhật ký giao dịch. Các mặt hàng đã được đồng bộ hóa. Node đã UP & SYNCED.`
+            );
+            addLog(`✅ Node ${id}: Background Recovery hoàn tất! Trạng thái: UP (SYNCED)`, 'success', `NODE-${id}`);
+          }
+          prevStatuses.current[id] = newSt;
+        });
+
+      } else {
+        if (isInitial) addLog("❌ Lỗi đồng bộ dữ liệu từ Coordinator API.", "error", "SYSTEM");
+      }
+    } catch (err) {
+      if (isInitial) addLog(`❌ Không thể kết nối với Coordinator server: ${err.message}`, "error", "SYSTEM");
+    }
+  }, [addLog, showToast]);
+
+  // Polling every 1.5s
+  useEffect(() => {
+    fetchStatus(true);
+    const interval = setInterval(() => fetchStatus(false), 1500);
+    return () => clearInterval(interval);
+  }, [fetchStatus]);
+
+  /* ─── WRITE ALL AVAILABLE (ROWA-A §14.4) ────────────────────────────── */
+  const handleWrite = useCallback(async (initiatorNodeId = 'COORD', customAmount = -7) => {
+    // 1. Get the current quantity of the selected SKU from active nodes
+    const getActiveSkuQuantity = () => {
+      for (const node of Object.values(nodes)) {
+        if (node.status === 'UP' || node.status === 'SYNCED') {
+          if (node.dataset && Array.isArray(node.dataset)) {
+            const item = node.dataset.find(i => i.SKU === selectedSku);
+            if (item) return item.Quantity;
+          }
+        }
+      }
+      return 100;
+    };
+
+    const oldQty = getActiveSkuQuantity();
+    const newQty = Math.max(0, oldQty + customAmount);
+
+    const txIdNext = txCounter + 1;
+    const txLabelStr = txLabel(txIdNext);
+
+    addLog(`${'─'.repeat(55)}`, 'gray');
+    const sourceLabel = initiatorNodeId === 'COORD' ? 'COORDINATOR' : `NODE ${initiatorNodeId} (Kho ${initiatorNodeId})`;
+    const sourceTag = initiatorNodeId === 'COORD' ? 'COORD' : `NODE-${initiatorNodeId}`;
+
+    addLog(`📤 ${sourceLabel}: Bắt đầu Write Transaction ${txLabelStr}`, 'system', sourceTag);
+    addLog(`   [HTTP POST /api/write] SKU=${selectedSku} | Giao dịch khởi tạo từ ${sourceLabel} | Tăng/giảm: ${customAmount > 0 ? `+${customAmount}` : customAmount}`, 'system', sourceTag);
+    addLog(`   Ghi lên TẤT CẢ available warehouses...`, 'system', sourceTag);
+
+    // Cảnh báo sớm nếu có node đang RECOVERING
+    const recoveringNodeIds = Object.keys(nodes).filter(id => nodes[id]?.status === 'RECOVERING');
+    if (recoveringNodeIds.length > 0) {
+      addLog(`⚠️ Node ${recoveringNodeIds.join(', ')} đang RECOVERING → KHÔNG THỂ GHI TRỰC TIẾP. Bỏ qua và ghi vào log để đồng bộ sau.`, 'warning', 'COORD');
+      showToast('warning',
+        `⚠️ Node ${recoveringNodeIds.join(', ')} đang RECOVERING — KHÔNG THỂ GHI TRỰC TIẾP`,
+        `Node đang trong quá trình phục hồi dữ liệu nên KHÔNG THỂ nhận yêu cầu ghi trực tiếp lúc này. Hệ thống sẽ tạm bỏ qua node này và tự động lưu vào Recovery Log để đồng bộ sau.`
+      );
+    }
+
+    try {
+      const res = await fetch('/api/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sku: selectedSku, delta: customAmount })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setTxCounter(data.tx_id);
+
+        data.committed_to.forEach(id => {
+          addLog(`   ✅ Warehouse ${id}: HTTP 200 COMMITTED | ${selectedSku}=${data.quantity}`, 'success', `NODE-${id}`);
+        });
+
+        data.failed_nodes.forEach(id => {
+          const isRecov = nodes[id]?.status === 'RECOVERING';
+          addLog(`   ⚠️  Warehouse ${id}: ${isRecov ? '🔄 KHÔNG THỂ GHI (đang RECOVERING, bỏ qua)' : '💥 KHÔNG THỂ GHI (node DOWN, bỏ qua)'} → ghi vào Recovery Log`, 'warning', `NODE-${id}`);
+        });
+
+        if (data.failed_nodes.length > 0) {
+          const recoveringFailed = data.failed_nodes.filter(id => nodes[id]?.status === 'RECOVERING');
+          const downFailed = data.failed_nodes.filter(id => nodes[id]?.status !== 'RECOVERING');
+          let detail = `Lần ghi ${customAmount > 0 ? `+${customAmount}` : customAmount} ${selectedSku}. Ghi thành công: ${data.committed_to.join(', ')}.`;
+          if (recoveringFailed.length > 0) detail += ` Node ${recoveringFailed.join(', ')} đang RECOVERING — sẽ tự đồng bộ sau khi phục hồi.`;
+          if (downFailed.length > 0) detail += ` Node ${downFailed.join(', ')} đang DOWN — đã ghi vào Recovery Log.`;
+          showToast('warning', `⚠️ Lần ghi hoàn tất một phần`, detail);
+        } else {
+          showToast('success', `✅ Giao dịch COMMITTED hoàn toàn`, `Giao dịch ${customAmount > 0 ? `+${customAmount}` : customAmount} thành công! Cập nhật tồn kho còn ${data.quantity} trên tất cả các kho.`);
+        }
+      } else {
+        const errData = await res.json();
+        addLog(`   ❌ Transaction ABORTED: ${errData.error || 'Server error'}`, 'error', sourceTag);
+        showToast('error', 'Giao dịch thất bại', errData.error || 'Tất cả các nodes hiện đang DOWN.');
+      }
+    } catch (err) {
+      addLog(`   ❌ Lỗi kết nối mạng: ${err.message}`, 'error', sourceTag);
+      showToast('error', 'Lỗi kết nối mạng', 'Không thể kết nối đến Coordinator.');
+    }
+    fetchStatus();
+  }, [txCounter, selectedSku, nodes, addLog, showToast, fetchStatus]);
+
+  /* ─── READ FROM NODE ─────────────────────────────────────────────────── */
+  const handleRead = useCallback(async (nodeId) => {
+    const node = nodes[nodeId];
+
+    addLog(`${'─'.repeat(55)}`, 'gray');
+    addLog(`📥 READ ${selectedSku} từ Node ${nodeId}...`, 'info', 'COORD');
+    addLog(`   [HTTP GET /api/read?node_id=${nodeId}&sku=${selectedSku}]`, 'info', 'COORD');
+
+    try {
+      const res = await fetch(`/api/read?node_id=${nodeId}&sku=${selectedSku}`);
+      const data = await res.json();
+
+      if (res.ok) {
+        addLog(`   ✅ Node ${nodeId}: HTTP 200 OK | Quantity=${data.quantity} | Version=${txLabel(data.lastTxId)}`, 'success', `NODE-${nodeId}`);
+        showToast('success',
+          `✅ READ từ Node ${nodeId} thành công`,
+          `${selectedSku} = ${data.quantity} units | Version: ${txLabel(data.lastTxId)}`
+        );
+      } else if (res.status === 400 && data.status === "STALE_READ_PREVENTED") {
+        // ★ STALE READ PREVENTION ★
+        addLog(`   🚫 Node ${nodeId}: HTTP 400 Bad Request (Stale Read Prevented)`, 'error', `NODE-${nodeId}`);
+        addLog(`   [§14.5.3] Node đang RECOVERING, từ chối trả dữ liệu cũ.`, 'error', `NODE-${nodeId}`);
+        showToast('error',
+          '🚨 TỪ CHỐI ĐỌC: STALE READ PREVENTED',
+          `Node ${nodeId} đang RECOVERING. Hệ thống đang đọc Recovery Log để catch-up. Đã ngăn chặn Stale Read thành công theo nguyên lý Özsu §14.5.3!`
+        );
+      } else {
+        addLog(`   ❌ Node ${nodeId}: HTTP 503 Service Unavailable (Node DOWN)`, 'error', `NODE-${nodeId}`);
+        showToast('error', `❌ Node ${nodeId} Offline`, `Node hiện đang DOWN hoặc mất kết nối.`);
+      }
+    } catch (err) {
+      addLog(`   ❌ Lỗi kết nối API: ${err.message}`, 'error', 'COORD');
+    }
+  }, [nodes, selectedSku, addLog, showToast]);
+
+  /* ─── CRASH NODE ─────────────────────────────────────────────────────── */
+  const handleCrash = useCallback(async (nodeId) => {
+    addLog(`${'─'.repeat(55)}`, 'gray');
+    addLog(`💥 Gây lỗi (CRASH) tại Node ${nodeId}... [HTTP POST /api/node/crash]`, 'error', 'COORD');
+
+    try {
+      const res = await fetch(`/api/node/crash?node_id=${nodeId}`, { method: 'POST' });
+      if (res.ok) {
+        addLog(`💥 Node ${nodeId} sập! Trạng thái chuyển sang: DOWN`, 'error', `NODE-${nodeId}`);
+        addLog(`   [ROWA-A]: Giao dịch tiếp theo sẽ tự động bỏ qua Node này.`, 'warning', 'COORD');
+        showToast('error',
+          `💥 Node ${nodeId} bị sập`,
+          `Simulated crash kích hoạt thành công. Node ${nodeId} hiện đang Offline.`
+        );
+      }
+    } catch (err) {
+      addLog(`❌ Không thể gửi lệnh Crash: ${err.message}`, 'error', 'COORD');
+    }
+    fetchStatus();
+  }, [addLog, showToast, fetchStatus]);
+
+  /* ─── RESTART NODE (Recovery Process) ───────────────────────────────── */
+  const handleRestart = useCallback(async (nodeId) => {
+    addLog(`${'─'.repeat(55)}`, 'gray');
+    addLog(`🔄 Gửi lệnh khởi động lại Node ${nodeId}... [HTTP POST /api/node/recover]`, 'warning', 'COORD');
+
+    try {
+      const res = await fetch(`/api/node/recover?node_id=${nodeId}`, { method: 'POST' });
+      if (res.ok) {
+        addLog(`🔄 Node ${nodeId} reboot: DOWN → RECOVERING`, 'warning', `NODE-${nodeId}`);
+        addLog(`   [§14.5] Đang đọc Recovery Log từ Coordinator để catch-up...`, 'warning', `NODE-${nodeId}`);
+        showToast('warning',
+          `🔄 Node ${nodeId} đang đồng bộ...`,
+          `Bắt đầu đọc và áp dụng các giao dịch bị lỡ từ Recovery Log của Coordinator...`
+        );
+      }
+    } catch (err) {
+      addLog(`❌ Không thể gửi lệnh phục hồi: ${err.message}`, 'error', 'COORD');
+    }
+    fetchStatus();
+  }, [addLog, showToast, fetchStatus]);
+
+  /* ─── RESET SYSTEM ───────────────────────────────────────────────────── */
+  const handleReset = useCallback(async () => {
+    addLog(`${'─'.repeat(55)}`, 'gray');
+    addLog(`🔁 Reset toàn bộ hệ thống... [HTTP POST /api/reset]`, 'system', 'COORD');
+
+    try {
+      const res = await fetch('/api/reset', { method: 'POST' });
+      if (res.ok) {
+        setTxCounter(0);
+        setSelectedSku("sku001");
+        addLog('🔁 Reset thành công! Xóa sạch các WAL và khôi phục Inventory = 100.', 'system', 'SYSTEM');
+        showToast('info', '🔁 System Reset', 'Đã khôi phục trạng thái ban đầu cho toàn bộ 3 Nodes.');
+      }
+    } catch (err) {
+      addLog(`❌ Lỗi khi gửi lệnh reset: ${err.message}`, 'error', 'SYSTEM');
+    }
+    fetchStatus();
+  }, [addLog, showToast, fetchStatus]);
+
+  const getAvailableSkus = () => {
+    const skus = new Set([]);
+    Object.values(nodes).forEach(node => {
+      if (node.dataset && Array.isArray(node.dataset)) {
+        node.dataset.forEach(item => {
+          if (item.SKU) skus.add(item.SKU);
+        });
+      }
+    });
+    return Array.from(skus);
+  };
+
+  const upCount   = Object.values(nodes).filter(n => n.status === NodeStatus.UP || n.status === 'SYNCED').length;
+  const downCount = Object.values(nodes).filter(n => n.status === NodeStatus.DOWN).length;
+  const anyDown   = downCount > 0;
+
+  return (
+    <div className="min-h-screen flex flex-col">
+
+      {/* TOAST OVERLAY */}
+      <Toast toast={toast} onDismiss={() => setToast(null)}/>
+
+      {/* HEADER */}
+      <header className="border-b border-slate-200 bg-white/90 backdrop-blur sticky top-0 z-40 px-6 py-3">
+        <div className="max-w-screen-2xl mx-auto flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-slate-800 flex items-center justify-center text-white shadow-sm">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+            </div>
+            <div>
+              <div className="font-black text-slate-800 text-base leading-none">Trung tâm Điều khiển Toàn cầu</div>
+              <div className="text-xs text-slate-500 mono mt-0.5">Trình Quản lý Giao dịch Phân tán</div>
+            </div>
+          </div>
+
+          {/* Live Stats */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs mono font-bold flex items-center gap-1.5">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div> {upCount} UP
+            </span>
+            {downCount > 0 && (
+              <span className="px-3 py-1.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs mono font-bold flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-red-500"></div> {downCount} DOWN
+              </span>
+            )}
+            <span className="px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 text-xs mono font-bold">
+              TX: {txLabel(txCounter)}
+            </span>
+            {recoveryLog.length > 0 && (
+              <span className="px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-xs mono font-bold flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div> {recoveryLog.length} pending logs
+              </span>
+            )}
+          </div>
+
+          <button onClick={handleReset}
+            className="btn-scale flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-bold transition-all shadow-sm">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            Reset System
+          </button>
+        </div>
+      </header>
+
+      {/* MAIN CONTENT */}
+      <main className="flex-1 max-w-screen-2xl mx-auto w-full p-4 md:p-6 flex flex-col gap-4">
+
+        {/* PRODUCT SELECTOR BAR */}
+        <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path></svg>
+            </div>
+            <div>
+              <div className="font-bold text-slate-800 text-sm">Chọn mặt hàng xem kho & giao dịch</div>
+              <div className="text-xs text-slate-500">Xem số lượng thực tế và thực hiện giao dịch cho từng mặt hàng</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <select
+                value={selectedSku}
+                onChange={(e) => setSelectedSku(e.target.value)}
+                className="appearance-none pl-4 pr-10 py-2.5 rounded-xl text-sm font-semibold border border-slate-200 bg-white text-slate-700 shadow-sm cursor-pointer min-w-[220px] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+              >
+                {getAvailableSkus().map(sku => (
+                  <option key={sku} value={sku}>{sku}</option>
+                ))}
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
+                <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+              </div>
+            </div>
+            <span className="text-xs text-slate-400 mono whitespace-nowrap">
+              {getAvailableSkus().length} mặt hàng
+            </span>
+          </div>
+        </div>
+
+        {/* RECOVERING WARNING BANNER */}
+        {Object.values(nodes).some(n => n.status === 'RECOVERING') && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
+              <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-bold text-amber-800 text-sm">
+                Node {Object.values(nodes).filter(n => n.status === 'RECOVERING').map(n => n.node_id).join(', ')} đang RECOVERING — KHÔNG THỂ GHI TRỰC TIẾP
+              </span>
+              <span className="text-xs text-amber-700 ml-2">
+                — Node đang trong quá trình phục hồi nên không thể nhận giao dịch ghi trực tiếp. Yêu cầu ghi mới sẽ bị bỏ qua và lưu vào Recovery Log để đồng bộ sau.
+              </span>
+            </div>
+            <span className="mono text-xs font-bold text-amber-500 bg-amber-100 border border-amber-200 px-2 py-1 rounded-lg flex-shrink-0">§14.5.3</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4" style={{minHeight:'420px'}}>
+
+          {/* ── COORDINATOR PANEL ── */}
+          <div className="lg:col-span-3 bg-white border border-slate-200 shadow-sm rounded-2xl overflow-hidden flex flex-col">
+            <div className="px-5 py-3 bg-gradient-to-r from-slate-50 to-white border-b border-slate-100 flex items-center gap-2">
+              <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+              <span className="font-bold text-sm text-slate-800">Truy cập Cổng Kho</span>
+            </div>
+
+            <div className="p-4 flex flex-col gap-3 flex-1">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 text-center space-y-4 flex-1 flex flex-col justify-center">
+                <div className="mx-auto w-12 h-12 bg-white rounded-2xl border border-slate-200 shadow-sm flex items-center justify-center text-slate-600">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
+                </div>
+                <p className="text-slate-800 font-bold text-sm">Hệ thống phân tán vật lý</p>
+                <p className="text-xs text-slate-500 px-2">Các thao tác Ghi (Write), Đọc (Read), Crash hay Recovery giờ đây được thực hiện trực tiếp trên các Web Server của từng Node.</p>
+                <div className="pt-4 mt-auto">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold mb-3">Truy cập Node Portal</p>
+                  <div className="flex justify-center gap-2">
+                    <a href="http://localhost:5001" target="_blank" rel="noreferrer" className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-600 flex items-center justify-center hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-colors shadow-sm font-bold">A</a>
+                    <a href="http://localhost:5002" target="_blank" rel="noreferrer" className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-600 flex items-center justify-center hover:bg-purple-50 hover:text-purple-600 hover:border-purple-200 transition-colors shadow-sm font-bold">B</a>
+                    <a href="http://localhost:5003" target="_blank" rel="noreferrer" className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-600 flex items-center justify-center hover:bg-pink-50 hover:text-pink-600 hover:border-pink-200 transition-colors shadow-sm font-bold">C</a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── NODES PANEL ── */}
+          <div className="lg:col-span-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {['A','B','C'].map(id => (
+              <NodeCard
+                key={id}
+                node={nodes[id]}
+                selectedSku={selectedSku}
+                onCrash={handleCrash}
+                onRestart={handleRestart}
+                onRead={handleRead}
+                onWrite={handleWrite}
+              />
+            ))}
+          </div>
+
+          {/* ── RECOVERY LOG PANEL ── */}
+          <div className="lg:col-span-3">
+            <RecoveryLogPanel entries={recoveryLog}/>
+          </div>
+        </div>
+
+        {/* SYSTEM TERMINAL LOG */}
+        <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden flex flex-col" style={{height:'260px'}}>
+          <div className="px-4 py-2.5 bg-slate-900 border-b border-slate-800 flex items-center gap-2 flex-shrink-0">
+            <div className="flex gap-1.5">
+              <div className="w-3 h-3 rounded-full bg-red-500 opacity-80"/>
+              <div className="w-3 h-3 rounded-full bg-yellow-500 opacity-80"/>
+              <div className="w-3 h-3 rounded-full bg-green-500 opacity-80"/>
+            </div>
+            <span className="ml-2 text-xs text-slate-500 mono">system_log — Cửa sổ Lệnh</span>
+            <button onClick={() => setTermLog([])}
+              className="ml-auto text-xs text-slate-600 hover:text-slate-400 mono transition-colors">
+              clear
+            </button>
+          </div>
+
+          <div ref={termRef} className="flex-1 overflow-y-auto p-4 space-y-0.5 bg-slate-950">
+            {termLog.map((entry, i) => <TermLine key={i} entry={entry}/>)}
+            <div className="flex items-center gap-1 mt-1">
+              <span className="t-green mono text-xs">$</span>
+              <span className="w-2 h-4 bg-green-400 opacity-70 animate-pulse"/>
+            </div>
+          </div>
+        </div>
+
+        {/* STATE MACHINE REFERENCE REMOVED FOR CLEANER UI */}
+      </main>
+
+      <footer className="py-6 px-6 text-center">
+        <p className="text-xs text-slate-400 font-medium">
+          Trung tâm Điều khiển Toàn cầu · Hệ thống Quản lý Kho Phân tán · 2026
+        </p>
+      </footer>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App/>);
+</script>
+</body>
+</html>

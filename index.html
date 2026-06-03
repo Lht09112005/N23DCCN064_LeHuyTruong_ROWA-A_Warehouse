@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ROWA-A Warehouse Inventory Simulator</title>
+  <meta name="description" content="Web Simulator for ROWA-A (Read One Write All Available) Distributed Database Protocol - Warehouse Inventory Demo"/>
+
+  <!-- ═══════════════════════════════════════
+       CDN DEPENDENCIES
+       ═══════════════════════════════════════ -->
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React 18 + ReactDOM + Babel -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Google Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+
+  <style>
+    /* ───────────────────────────────────────
+       GLOBAL STYLES & CUSTOM ANIMATIONS
+    ─────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #080c14;
+      color: #e2e8f0;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+
+    /* Neon glow effects */
+    .glow-blue  { box-shadow: 0 0 20px rgba(59,130,246,0.4), 0 0 60px rgba(59,130,246,0.15); }
+    .glow-green { box-shadow: 0 0 20px rgba(34,197,94,0.4),  0 0 60px rgba(34,197,94,0.15); }
+    .glow-red   { box-shadow: 0 0 20px rgba(239,68,68,0.4),  0 0 60px rgba(239,68,68,0.15); }
+    .glow-yellow{ box-shadow: 0 0 20px rgba(234,179,8,0.4),  0 0 60px rgba(234,179,8,0.15); }
+
+    /* Pulsing RECOVERING badge */
+    @keyframes pulse-border {
+      0%,100% { box-shadow: 0 0 0 0 rgba(234,179,8,0.6), 0 0 20px rgba(234,179,8,0.3); }
+      50%      { box-shadow: 0 0 0 6px rgba(234,179,8,0),  0 0 40px rgba(234,179,8,0.5); }
+    }
+    .recovering-pulse { animation: pulse-border 1.2s ease infinite; }
+
+    /* Spinning recovery icon */
+    @keyframes spin { from {transform:rotate(0deg)} to {transform:rotate(360deg)} }
+    .spin { animation: spin 1s linear infinite; }
+
+    /* Grid background */
+    .grid-bg {
+      background-image:
+        linear-gradient(rgba(59,130,246,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(59,130,246,0.04) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+
+    /* Recovery Log item slide-in */
+    @keyframes slideIn {
+      from { opacity:0; transform: translateX(-12px); }
+      to   { opacity:1; transform: translateX(0); }
+    }
+    .log-item { animation: slideIn 0.3s ease; }
+
+    /* Toast */
+    @keyframes toastIn {
+      from { opacity:0; transform: translateY(-30px) scale(0.95); }
+      to   { opacity:1; transform: translateY(0) scale(1); }
+    }
+    @keyframes toastOut {
+      from { opacity:1; transform: translateY(0) scale(1); }
+      to   { opacity:0; transform: translateY(-20px) scale(0.95); }
+    }
+    .toast-enter { animation: toastIn  0.35s cubic-bezier(0.34,1.56,0.64,1); }
+    .toast-leave { animation: toastOut 0.3s ease forwards; }
+
+    /* Scrollbar dark style */
+    ::-webkit-scrollbar       { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0d1117; }
+    ::-webkit-scrollbar-thumb { background: #2d3748; border-radius:3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #4a5568; }
+
+    /* Button hover scale */
+    .btn-scale { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+    .btn-scale:hover:not(:disabled) { transform: translateY(-1px); }
+    .btn-scale:active:not(:disabled){ transform: translateY(0px); }
+
+    /* Progress bar */
+    @keyframes progressAnim {
+      from { width: 0%; }
+      to   { width: 100%; }
+    }
+    .progress-bar { animation: progressAnim linear forwards; }
+
+    /* Node card glow border */
+    .node-up       { border-color: rgba(34,197,94,0.5);  }
+    .node-down     { border-color: rgba(239,68,68,0.5);  }
+    .node-recovering{ border-color: rgba(234,179,8,0.7); }
+
+    /* Terminal output line type colors */
+    .t-info    { color: #60a5fa; }
+    .t-success { color: #4ade80; }
+    .t-warning { color: #fbbf24; }
+    .t-error   { color: #f87171; }
+    .t-system  { color: #c084fc; }
+    .t-gray    { color: #6b7280; }
+  </style>
+
+  <script>
+    // Tailwind config
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            navy:  { 950:'#020817', 900:'#080c14', 800:'#0d1117', 700:'#111827', 600:'#1a2236' },
+            brand: { 500:'#3b82f6', 400:'#60a5fa', 300:'#93c5fd' },
+          }
+        }
+      }
+    }
+  </script>
+</head>
+
+<body class="grid-bg">
+<div id="root"></div>
+
+<script type="text/babel">
+/* ═════════════════════════════════════════════════════════════════════════════
+   ROWA-A Warehouse Inventory Web Simulator
+   Đề tài 42 - Cơ sở Dữ liệu Phân tán
+   Tham chiếu: Özsu & Valduriez "Principles of DDBS", 4th Ed. §14.4, §14.5
+   ═════════════════════════════════════════════════════════════════════════════ */
+
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ─── CONSTANTS ──────────────────────────────────────────────────────────── */
+const RECOVERY_DELAY_MS = 4500;   // Thời gian RECOVERING (ms)
+const SKU               = "Laptop";
+const INITIAL_QTY       = 100;    // Số lượng ban đầu
+
+/* ─── NODE STATE ENUM ────────────────────────────────────────────────────── */
+const NodeStatus = { UP: 'UP', DOWN: 'DOWN', RECOVERING: 'RECOVERING' };
+
+/* ─── INITIAL STATE ──────────────────────────────────────────────────────── */
+const makeNode = (id) => ({
+  id,
+  status:   NodeStatus.UP,
+  quantity: INITIAL_QTY,
+  lastTxId: 0,
+  version:  0,
+  recoverProgress: 0,   // 0..100 khi đang RECOVERING
+});
+
+/* ─── HELPERS ────────────────────────────────────────────────────────────── */
+const ts = () => new Date().toLocaleTimeString('vi-VN', { hour12: false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+const txLabel = (id) => id > 0 ? `TX-${String(id).padStart(3,'0')}` : '—';
+const randQty  = (base) => Math.floor(base + (Math.random()*160 - 30));
+
+/* ═════════════════════════════════════════════════════════════════════════════
+   SUB-COMPONENTS
+   ═════════════════════════════════════════════════════════════════════════════ */
+
+/* ─── STATUS BADGE ───────────────────────────────────────────────────────── */
+const StatusBadge = ({ status }) => {
+  const cfg = {
+    [NodeStatus.UP]:         { bg:'bg-emerald-500/20', text:'text-emerald-400', border:'border-emerald-500/40', label:'🟢 UP',         dot:'bg-emerald-400' },
+    [NodeStatus.DOWN]:       { bg:'bg-red-500/20',     text:'text-red-400',     border:'border-red-500/40',     label:'🔴 DOWN',       dot:'bg-red-500' },
+    [NodeStatus.RECOVERING]: { bg:'bg-yellow-500/20',  text:'text-yellow-300',  border:'border-yellow-500/50',  label:'🟡 RECOVERING', dot:'bg-yellow-400' },
+  }[status];
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border mono ${cfg.bg} ${cfg.text} ${cfg.border}`}>
+      <span className={`w-2 h-2 rounded-full ${cfg.dot} ${status === NodeStatus.UP ? 'animate-pulse' : ''}`}/>
+      {cfg.label}
+    </span>
+  );
+};
+
+/* ─── NODE CARD ──────────────────────────────────────────────────────────── */
+const NodeCard = ({ node, onCrash, onRestart, onRead }) => {
+  const isUp         = node.status === NodeStatus.UP;
+  const isDown       = node.status === NodeStatus.DOWN;
+  const isRecovering = node.status === NodeStatus.RECOVERING;
+
+  // Dynamic border class
+  const borderClass = isUp ? 'node-up' : isDown ? 'node-down' : 'node-recovering recovering-pulse';
+  const glowClass   = isUp ? 'glow-green' : isDown ? 'glow-red' : 'glow-yellow';
+
+  // Node header color
+  const headerGrad = isUp
+    ? 'from-emerald-900/60 to-slate-900/60'
+    : isDown
+    ? 'from-red-900/60 to-slate-900/60'
+    : 'from-yellow-900/60 to-slate-900/60';
+
+  const nodeColors = { A: '#3b82f6', B: '#8b5cf6', C: '#ec4899' };
+
+  return (
+    <div className={`relative rounded-2xl border-2 bg-slate-900/80 backdrop-blur overflow-hidden transition-all duration-500 ${borderClass} ${glowClass}`}>
+      {/* Header */}
+      <div className={`bg-gradient-to-r ${headerGrad} px-5 py-4 flex items-center justify-between`}>
+        <div className="flex items-center gap-3">
+          {/* Node Icon */}
+          <div className="w-11 h-11 rounded-xl flex items-center justify-center font-black text-xl"
+               style={{background: `${nodeColors[node.id]}22`, border: `2px solid ${nodeColors[node.id]}55`, color: nodeColors[node.id]}}>
+            {node.id}
+          </div>
+          <div>
+            <div className="font-bold text-white text-sm">Node {node.id}</div>
+            <div className="text-xs text-slate-400 mono">Warehouse {node.id}</div>
+          </div>
+        </div>
+        <StatusBadge status={node.status}/>
+      </div>
+
+      {/* Recovery Progress Bar */}
+      {isRecovering && (
+        <div className="px-5 pt-3">
+          <div className="flex justify-between text-xs text-yellow-400 mb-1 mono">
+            <span>📖 Đọc Recovery Log...</span>
+            <span>{Math.round(node.recoverProgress)}%</span>
+          </div>
+          <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-yellow-500 to-amber-400 rounded-full transition-all duration-200"
+                 style={{width: `${node.recoverProgress}%`}}/>
+          </div>
+        </div>
+      )}
+
+      {/* Stock Data */}
+      <div className="px-5 py-4">
+        <div className="bg-slate-800/60 rounded-xl p-4 space-y-3 border border-slate-700/40">
+          {/* SKU Row */}
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-slate-400 uppercase tracking-widest">SKU</div>
+            <div className="mono text-sm font-semibold text-blue-300">{SKU}</div>
+          </div>
+
+          {/* Quantity - big display */}
+          <div className="text-center py-2">
+            <div className="text-4xl font-black mono"
+                 style={{color: isDown ? '#ef4444' : isRecovering ? '#facc15' : '#4ade80',
+                         textShadow: `0 0 20px ${isDown ? '#ef444460' : isRecovering ? '#facc1560' : '#4ade8060'}`}}>
+              {isDown ? '—' : node.quantity}
+            </div>
+            <div className="text-xs text-slate-400 mt-1">Units in Stock</div>
+          </div>
+
+          {/* Version / TX */}
+          <div className="flex items-center justify-between pt-1 border-t border-slate-700/40">
+            <div className="text-xs text-slate-400">Last TX</div>
+            <div className={`mono text-xs font-semibold px-2 py-0.5 rounded ${node.lastTxId > 0 ? 'bg-blue-950 text-blue-300' : 'bg-slate-800 text-slate-500'}`}>
+              {txLabel(node.lastTxId)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="px-5 pb-5 grid grid-cols-3 gap-2">
+        {/* READ */}
+        <button
+          onClick={() => onRead(node.id)}
+          disabled={isDown}
+          title={isRecovering ? "Node đang RECOVERING - sẽ bị chặn nếu nhấn!" : ""}
+          className={`btn-scale col-span-1 flex flex-col items-center gap-1 px-2 py-2.5 rounded-xl text-xs font-semibold transition-all
+            ${isDown
+              ? 'bg-slate-800/40 text-slate-600 cursor-not-allowed'
+              : isRecovering
+              ? 'bg-yellow-500/20 border border-yellow-500/50 text-yellow-300 hover:bg-yellow-500/30'
+              : 'bg-blue-600/20 border border-blue-500/40 text-blue-300 hover:bg-blue-600/30 hover:border-blue-400/60'}`}>
+          <span className="text-base">📖</span>
+          <span>Read</span>
+        </button>
+
+        {/* CRASH */}
+        <button
+          onClick={() => onCrash(node.id)}
+          disabled={!isUp}
+          className={`btn-scale col-span-1 flex flex-col items-center gap-1 px-2 py-2.5 rounded-xl text-xs font-semibold transition-all
+            ${!isUp
+              ? 'bg-slate-800/40 text-slate-600 cursor-not-allowed'
+              : 'bg-red-600/20 border border-red-500/40 text-red-300 hover:bg-red-600/30 hover:border-red-400/60'}`}>
+          <span className="text-base">💥</span>
+          <span>Crash</span>
+        </button>
+
+        {/* RESTART */}
+        <button
+          onClick={() => onRestart(node.id)}
+          disabled={!isDown}
+          className={`btn-scale col-span-1 flex flex-col items-center gap-1 px-2 py-2.5 rounded-xl text-xs font-semibold transition-all
+            ${!isDown
+              ? 'bg-slate-800/40 text-slate-600 cursor-not-allowed'
+              : 'bg-green-600/20 border border-green-500/40 text-green-300 hover:bg-green-600/30 hover:border-green-400/60'}`}>
+          <span className={`text-base ${isRecovering ? 'spin' : ''}`}>🔄</span>
+          <span>Restart</span>
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/* ─── TOAST NOTIFICATION ─────────────────────────────────────────────────── */
+const Toast = ({ toast, onDismiss }) => {
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(onDismiss, 5500);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  if (!toast) return null;
+
+  const cfg = {
+    error:   { bg:'bg-red-950',    border:'border-red-500',   icon:'🚨', textColor:'text-red-100' },
+    success: { bg:'bg-green-950',  border:'border-green-500', icon:'✅', textColor:'text-green-100' },
+    warning: { bg:'bg-yellow-950', border:'border-yellow-500',icon:'⚠️',  textColor:'text-yellow-100' },
+    info:    { bg:'bg-blue-950',   border:'border-blue-500',  icon:'ℹ️',  textColor:'text-blue-100' },
+  }[toast.type] || {};
+
+  return (
+    <div className={`toast-enter fixed top-5 left-1/2 -translate-x-1/2 z-50 max-w-xl w-full mx-4 
+        ${cfg.bg} border-2 ${cfg.border} rounded-2xl shadow-2xl p-4 flex items-start gap-3`}>
+      <span className="text-2xl flex-shrink-0 mt-0.5">{cfg.icon}</span>
+      <div className="flex-1">
+        <div className={`font-bold text-sm ${cfg.textColor}`}>{toast.title}</div>
+        <div className="text-xs mt-1 text-slate-300 leading-relaxed">{toast.message}</div>
+      </div>
+      <button onClick={onDismiss} className="text-slate-400 hover:text-white text-lg leading-none flex-shrink-0">×</button>
+    </div>
+  );
+};
+
+/* ─── TERMINAL LOG LINE ──────────────────────────────────────────────────── */
+const TermLine = ({ entry }) => {
+  const typeClass = {
+    info: 't-info', success: 't-success', warning: 't-warning',
+    error: 't-error', system: 't-system', gray: 't-gray',
+  }[entry.type] || 't-info';
+
+  return (
+    <div className={`log-item mono text-xs leading-relaxed ${typeClass}`}>
+      <span className="t-gray select-none">[{entry.time}] </span>
+      {entry.label && <span className="text-purple-400">[{entry.label}] </span>}
+      {entry.msg}
+    </div>
+  );
+};
+
+/* ─── RECOVERY LOG PANEL ─────────────────────────────────────────────────── */
+const RecoveryLogPanel = ({ entries }) => (
+  <div className="bg-slate-900/80 border border-slate-700/50 rounded-2xl overflow-hidden h-full flex flex-col">
+    <div className="px-4 py-3 bg-gradient-to-r from-amber-900/40 to-slate-900/40 border-b border-slate-700/40 flex items-center gap-2">
+      <span className="text-amber-400 text-sm">📋</span>
+      <span className="text-sm font-bold text-amber-300">Recovery Log</span>
+      <span className="ml-auto mono text-xs text-slate-500 bg-slate-800 px-2 py-0.5 rounded-full">
+        {entries.length} entries
+      </span>
+    </div>
+    <div className="flex-1 overflow-y-auto p-3 space-y-1.5 min-h-0">
+      {entries.length === 0 ? (
+        <div className="text-center py-8 text-slate-600 text-xs mono">Chưa có entry nào</div>
+      ) : (
+        entries.map((e, i) => (
+          <div key={i} className="log-item bg-amber-950/30 border border-amber-800/30 rounded-lg px-3 py-2">
+            <div className="flex items-center justify-between mb-1">
+              <span className="mono text-xs font-bold text-amber-400">{txLabel(e.txId)}</span>
+              <span className="mono text-xs text-slate-500">{e.time}</span>
+            </div>
+            <div className="mono text-xs text-slate-300">
+              {SKU}: <span className="text-red-400">{e.oldQty}</span>
+              <span className="text-slate-500"> → </span>
+              <span className="text-green-400">{e.newQty}</span>
+            </div>
+            <div className="mono text-xs text-slate-500 mt-0.5">
+              Missed by: {e.missedBy.map(n => (
+                <span key={n} className="inline-block bg-red-950/50 text-red-400 border border-red-800/40 rounded px-1 mr-1">{n}</span>
+              ))}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+    {entries.length > 0 && (
+      <div className="px-3 pb-3">
+        <div className="bg-slate-800/40 rounded-lg px-3 py-2 border border-slate-700/40">
+          <p className="text-xs text-slate-400 leading-relaxed">
+            📖 <span className="text-yellow-400 font-semibold">Özsu §14.5:</span> Node DOWN sẽ đọc log này khi reboot để đồng bộ các TX bị lỡ.
+          </p>
+        </div>
+      </div>
+    )}
+  </div>
+);
+
+/* ═════════════════════════════════════════════════════════════════════════════
+   MAIN APP
+   ═════════════════════════════════════════════════════════════════════════════ */
+function App() {
+  /* ─── STATE ──────────────────────────────────────────────────────────── */
+  const [nodes, setNodes]           = useState({
+    A: makeNode('A'),
+    B: makeNode('B'),
+    C: makeNode('C'),
+  });
+  const [txCounter, setTxCounter]   = useState(0);
+  const [recoveryLog, setRecoveryLog] = useState([]);   // Các TX bị lỡ
+  const [termLog, setTermLog]       = useState([]);     // System terminal log
+  const [toast, setToast]           = useState(null);
+  const [writeQty, setWriteQty]     = useState(INITIAL_QTY); // Qty cuối cùng write
+
+  const termRef    = useRef(null);
+  const recTimers  = useRef({});   // node_id -> interval timer cho recovery progress
+
+  /* ─── AUTO-SCROLL TERMINAL ───────────────────────────────────────────── */
+  useEffect(() => {
+    if (termRef.current) {
+      termRef.current.scrollTop = termRef.current.scrollHeight;
+    }
+  }, [termLog]);
+
+  /* ─── HELPERS ────────────────────────────────────────────────────────── */
+  const addLog = useCallback((msg, type = 'info', label = null) => {
+    setTermLog(prev => [...prev.slice(-199), { msg, type, label, time: ts() }]);
+  }, []);
+
+  const showToast = useCallback((type, title, message) => {
+    setToast({ type, title, message });
+  }, []);
+
+  /* ─── WRITE ALL AVAILABLE (ROWA-A §14.4) ────────────────────────────── */
+  const handleWrite = useCallback(() => {
+    const newTx  = txCounter + 1;
+    const oldQty = writeQty;
+    const newQty = Math.max(10, randQty(writeQty));
+    const now    = ts();
+
+    // ★ FIX: Snapshot available/down node lists BEFORE calling setNodes.
+    //   React may invoke the setNodes updater multiple times (Strict Mode),
+    //   so computing arrays inside the updater leads to duplicated/garbled results.
+    const availableNodes = Object.values(nodes)
+      .filter(n => n.status === NodeStatus.UP)
+      .map(n => n.id);
+    const recoveringNodes = Object.values(nodes)
+      .filter(n => n.status === NodeStatus.RECOVERING)
+      .map(n => n.id);
+    const downNodes = Object.values(nodes)
+      .filter(n => n.status !== NodeStatus.UP)
+      .map(n => n.id);
+
+    setTxCounter(newTx);
+    setWriteQty(newQty);
+
+    // Pure state update — no side effects inside updater
+    setNodes(prev => {
+      const next = { ...prev };
+      availableNodes.forEach(id => {
+        next[id] = { ...next[id], quantity: newQty, lastTxId: newTx, version: next[id].version + 1 };
+      });
+      return next;
+    });
+
+    // Log: header (safe outside updater)
+    addLog(`${'─'.repeat(55)}`, 'gray');
+    addLog(`📤 COORDINATOR: Bắt đầu Write Transaction ${txLabel(newTx)}`, 'system', 'COORD');
+    addLog(`   SKU=${SKU} | Qty: ${oldQty} → ${newQty}`, 'system', 'COORD');
+    addLog(`   [ROWA-A §14.4] Ghi lên TẤT CẢ available nodes...`, 'system', 'COORD');
+
+    // Cảnh báo sớm nếu có node RECOVERING
+    if (recoveringNodes.length > 0) {
+      addLog(`⚠️ Node ${recoveringNodes.join(', ')} đang RECOVERING → KHÔNG THỂ GHI TRỰC TIẾP. Bỏ qua và ghi vào log để đồng bộ sau.`, 'warning', 'COORD');
+      showToast('warning',
+        `⚠️ Node ${recoveringNodes.join(', ')} đang RECOVERING — KHÔNG THỂ GHI TRỰC TIẾP`,
+        `Node đang trong quá trình phục hồi dữ liệu nên KHÔNG THỂ nhận yêu cầu ghi trực tiếp lúc này. Hệ thống sẽ tạm bỏ qua node này và tự động lưu vào Recovery Log để đồng bộ sau.`
+      );
+    }
+
+    if (availableNodes.length === 0) {
+      addLog(`   ❌ Không có node nào available! Transaction ABORTED.`, 'error', 'COORD');
+      showToast('error', 'Transaction Aborted', 'Tất cả nodes đang DOWN. Không thể ghi dữ liệu.');
+      return;
+    }
+
+    // Simulate commit latency, then log results
+    setTimeout(() => {
+      availableNodes.forEach(id => {
+        addLog(`✅ Node ${id}: PREPARED → COMMITTED | ${SKU}=${newQty} | ${txLabel(newTx)}`, 'success', `NODE-${id}`);
+      });
+
+      if (downNodes.length > 0) {
+        downNodes.forEach(id => {
+          const isRecov = nodes[id]?.status === NodeStatus.RECOVERING;
+          addLog(`⚠️  Node ${id}: ${isRecov ? '🔄 KHÔNG THỂ GHI (đang RECOVERING, bỏ qua)' : '💥 KHÔNG THỂ GHI (node DOWN, bỏ qua)'} → TX ghi vào Recovery Log.`, 'warning', `NODE-${id}`);
+        });
+
+        // Ghi vào Recovery Log (simulated persistent WAL)
+        setRecoveryLog(prev => [...prev, {
+          txId:      newTx,
+          oldQty,
+          newQty,
+          time:      now,
+          missedBy:  [...downNodes],
+          appliedTo: [...availableNodes],
+        }]);
+
+        addLog(`📋 Recovery Log cập nhật: ${txLabel(newTx)} sẽ được apply khi node DOWN reboot.`, 'warning', 'COORD');
+      }
+
+      addLog(`   ✅ Transaction ${txLabel(newTx)} → COMMITTED (${availableNodes.length}/3 nodes)`, 'success', 'COORD');
+    }, 150);
+
+  // nodes is a dependency because we snapshot from it directly
+  }, [nodes, txCounter, writeQty, addLog, showToast]);
+
+  /* ─── READ FROM NODE ─────────────────────────────────────────────────── */
+  const handleRead = useCallback((nodeId) => {
+    // ★ FIX: Read node status from `nodes` snapshot directly (not inside updater)
+    //   to avoid side-effects inside the React state updater function.
+    const node = nodes[nodeId];
+
+    // ★ STALE READ PREVENTION ★
+    // Ref: Özsu §14.5.3 - "A recovering site MUST NOT serve reads"
+    if (node.status === NodeStatus.RECOVERING) {
+      addLog(`${'─'.repeat(55)}`, 'gray');
+      addLog(`📥 READ ${SKU} từ Node ${nodeId}...`, 'warning', 'COORD');
+      addLog(`🚨 STALE READ PREVENTED! Node ${nodeId} đang RECOVERING.`, 'error', `NODE-${nodeId}`);
+      addLog(`   Từ chối trả dữ liệu cũ theo quy tắc Özsu §14.5.3.`, 'error', `NODE-${nodeId}`);
+      showToast('error',
+        '🚨 TỪ CHỐI ĐỌC: STALE READ PREVENTED',
+        `Node ${nodeId} đang RECOVERING. Hệ thống đang đọc Recovery Log. Phải chặn lại để tránh STALE READ theo quy tắc Özsu §14.5.3!`
+      );
+      return;
+    }
+
+    if (node.status === NodeStatus.DOWN) {
+      addLog(`📥 READ Node ${nodeId} → ❌ Node DOWN, từ chối đọc.`, 'error', 'COORD');
+      return;
+    }
+
+    // Node UP → phục vụ bình thường (ROWA-A: Read One)
+    addLog(`${'─'.repeat(55)}`, 'gray');
+    addLog(`📥 READ ${SKU} từ Node ${nodeId} [ROWA-A: Read One]`, 'info', 'COORD');
+    addLog(`   ✅ Node ${nodeId}: ${SKU}=${node.quantity} | Version=${txLabel(node.lastTxId)}`, 'success', `NODE-${nodeId}`);
+    showToast('success',
+      `✅ READ từ Node ${nodeId} thành công`,
+      `${SKU} = ${node.quantity} units | Version: ${txLabel(node.lastTxId)}`
+    );
+  // nodes is a dependency because we read directly from it
+  }, [nodes, addLog, showToast]);
+
+  /* ─── CRASH NODE ─────────────────────────────────────────────────────── */
+  const handleCrash = useCallback((nodeId) => {
+    // Hủy recovery timer nếu có
+    if (recTimers.current[nodeId]) {
+      clearInterval(recTimers.current[nodeId]);
+      delete recTimers.current[nodeId];
+    }
+
+    setNodes(prev => ({
+      ...prev,
+      [nodeId]: { ...prev[nodeId], status: NodeStatus.DOWN, recoverProgress: 0 },
+    }));
+
+    addLog(`${'─'.repeat(55)}`, 'gray');
+    addLog(`💥 SIMULATED CRASH tại Node ${nodeId}!`, 'error', `NODE-${nodeId}`);
+    addLog(`   State: UP → DOWN. Node không tham gia giao thức.`, 'error', `NODE-${nodeId}`);
+    addLog(`   [ROWA-A §14.4]: Coordinator sẽ bỏ qua node này trong TX tiếp theo.`, 'warning', 'COORD');
+
+    showToast('error',
+      `💥 Node ${nodeId} bị CRASH`,
+      `Node ${nodeId} đã bị sập. Các Write transaction tiếp theo sẽ bỏ qua node này và ghi vào Recovery Log.`
+    );
+  }, [addLog, showToast]);
+
+  /* ─── RESTART NODE (Recovery Process) ───────────────────────────────── */
+  const handleRestart = useCallback((nodeId) => {
+    addLog(`${'─'.repeat(55)}`, 'gray');
+    addLog(`🔄 Node ${nodeId} reboot... Bắt đầu Recovery Process.`, 'warning', `NODE-${nodeId}`);
+    addLog(`   State: DOWN → RECOVERING`, 'warning', `NODE-${nodeId}`);
+    addLog(`   [§14.5] Đọc Recovery Log để catch-up các TX bị lỡ...`, 'warning', `NODE-${nodeId}`);
+
+    // Chuyển sang RECOVERING ngay
+    setNodes(prev => ({
+      ...prev,
+      [nodeId]: { ...prev[nodeId], status: NodeStatus.RECOVERING, recoverProgress: 0 },
+    }));
+
+    // Đếm số entries cần catch-up
+    const missedTxs = recoveryLog.filter(e => e.missedBy.includes(nodeId));
+
+    // Progress bar simulation
+    const startTime = Date.now();
+    const interval = setInterval(() => {
+      const elapsed  = Date.now() - startTime;
+      const progress = Math.min(100, (elapsed / RECOVERY_DELAY_MS) * 100);
+
+      setNodes(prev => {
+        if (prev[nodeId].status !== NodeStatus.RECOVERING) {
+          clearInterval(interval);
+          return prev;
+        }
+        return { ...prev, [nodeId]: { ...prev[nodeId], recoverProgress: progress }};
+      });
+
+      if (elapsed >= RECOVERY_DELAY_MS) {
+        clearInterval(interval);
+        delete recTimers.current[nodeId];
+        finishRecovery(nodeId, missedTxs);
+      }
+    }, 80);
+
+    recTimers.current[nodeId] = interval;
+  }, [recoveryLog, addLog, showToast]);
+
+  /* ─── FINISH RECOVERY → SYNCED ───────────────────────────────────────── */
+  const finishRecovery = useCallback((nodeId, missedTxs) => {
+    setNodes(prev => {
+      const node = prev[nodeId];
+      if (node.status !== NodeStatus.RECOVERING) return prev;
+
+      // Apply tất cả TX bị lỡ (lấy qty mới nhất = writeQty hiện tại)
+      const latestQty = missedTxs.length > 0
+        ? missedTxs[missedTxs.length - 1].newQty
+        : node.quantity;
+      const latestTx  = missedTxs.length > 0
+        ? missedTxs[missedTxs.length - 1].txId
+        : node.lastTxId;
+
+      addLog(`📖 Node ${nodeId}: Apply ${missedTxs.length} TX từ Recovery Log...`, 'system', `NODE-${nodeId}`);
+      missedTxs.forEach(e => {
+        addLog(`   ↳ Apply ${txLabel(e.txId)}: ${SKU} ${e.oldQty} → ${e.newQty}`, 'system', `NODE-${nodeId}`);
+      });
+      addLog(`✅ Node ${nodeId}: Recovery hoàn tất! State: RECOVERING → UP (SYNCED)`, 'success', `NODE-${nodeId}`);
+      addLog(`   ${SKU}=${latestQty} | Version=${txLabel(latestTx)}`, 'success', `NODE-${nodeId}`);
+
+      showToast('success',
+        `✅ Node ${nodeId} đã Recovery thành công!`,
+        `Đã đồng bộ ${missedTxs.length} transaction từ Recovery Log. ${SKU} = ${latestQty} units. Node UP và SYNCED.`
+      );
+
+      return {
+        ...prev,
+        [nodeId]: {
+          ...node,
+          status:          NodeStatus.UP,
+          quantity:        latestQty,
+          lastTxId:        latestTx,
+          version:         node.version + missedTxs.length,
+          recoverProgress: 100,
+        },
+      };
+    });
+
+    // Xóa các recovery log entries đã được apply (chỉ xóa entry có nodeId trong missedBy)
+    setRecoveryLog(prev =>
+      prev.map(e => ({
+        ...e,
+        missedBy: e.missedBy.filter(n => n !== nodeId),
+      })).filter(e => e.missedBy.length > 0)
+    );
+  }, [addLog, showToast]);
+
+  /* ─── RESET SYSTEM ───────────────────────────────────────────────────── */
+  const handleReset = useCallback(() => {
+    Object.values(recTimers.current).forEach(clearInterval);
+    recTimers.current = {};
+    setNodes({ A: makeNode('A'), B: makeNode('B'), C: makeNode('C') });
+    setTxCounter(0);
+    setWriteQty(INITIAL_QTY);
+    setRecoveryLog([]);
+    setTermLog([{
+      msg: '🔁 Hệ thống đã được Reset. Tất cả nodes→READY.',
+      type: 'system', label: 'SYSTEM', time: ts(),
+    }]);
+    setToast(null);
+  }, []);
+
+  /* ─── ON MOUNT: Welcome log ──────────────────────────────────────────── */
+  useEffect(() => {
+    setTermLog([
+      { msg: '════════════════════════════════════════════════════', type: 'gray',    label: null,     time: ts() },
+      { msg: '  ROWA-A Warehouse Inventory Simulator',             type: 'system',  label: 'SYSTEM', time: ts() },
+      { msg: '  Özsu & Valduriez §14.4 (ROWA-A) + §14.5 (Recovery)', type: 'gray', label: null,     time: ts() },
+      { msg: '════════════════════════════════════════════════════', type: 'gray',    label: null,     time: ts() },
+      { msg: '✅ Tất cả 3 nodes khởi động thành công (State: UP)',  type: 'success', label: 'SYSTEM', time: ts() },
+      { msg: `   Stock ban đầu: ${SKU} = ${INITIAL_QTY} units tại mỗi kho.`, type: 'info', label: null, time: ts() },
+      { msg: '👉 Hướng dẫn: nhấn "Gây Crash 💥" rồi "Write All Available" rồi "Khởi động lại 🔄"', type: 'gray', label: null, time: ts() },
+    ]);
+  }, []);
+
+  /* ─── STATS HELPERS ──────────────────────────────────────────────────── */
+  const upCount        = Object.values(nodes).filter(n => n.status === NodeStatus.UP).length;
+  const downCount      = Object.values(nodes).filter(n => n.status === NodeStatus.DOWN).length;
+  const recoveringCount = Object.values(nodes).filter(n => n.status === NodeStatus.RECOVERING).length;
+  const anyDown        = downCount > 0;
+  const anyRecovering  = recoveringCount > 0;
+
+  /* ─── RENDER ──────────────────────────────────────────────────────────── */
+  return (
+    <div className="min-h-screen flex flex-col">
+
+      {/* ══════════════════════════════════════════
+          TOAST OVERLAY
+      ══════════════════════════════════════════ */}
+      <Toast toast={toast} onDismiss={() => setToast(null)}/>
+
+      {/* ══════════════════════════════════════════
+          HEADER
+      ══════════════════════════════════════════ */}
+      <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur sticky top-0 z-40 px-6 py-3">
+        <div className="max-w-screen-2xl mx-auto flex items-center justify-between gap-4 flex-wrap">
+          {/* Title */}
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-lg">🏭</div>
+            <div>
+              <div className="font-black text-white text-base leading-none">ROWA-A Simulator</div>
+              <div className="text-xs text-slate-500 mono">Warehouse Inventory · Đề tài 42 CSDLPT</div>
+            </div>
+          </div>
+
+          {/* Live Stats */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="px-3 py-1 rounded-full bg-emerald-950/60 border border-emerald-700/40 text-emerald-400 text-xs mono font-semibold">
+              🟢 {upCount} UP
+            </span>
+            {downCount > 0 && (
+              <span className="px-3 py-1 rounded-full bg-red-950/60 border border-red-700/40 text-red-400 text-xs mono font-semibold">
+                🔴 {downCount} DOWN
+              </span>
+            )}
+            <span className="px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-400 text-xs mono font-semibold">
+              TX: {txLabel(txCounter)}
+            </span>
+            {recoveryLog.length > 0 && (
+              <span className="px-3 py-1 rounded-full bg-amber-950/60 border border-amber-700/40 text-amber-400 text-xs mono font-semibold animate-pulse">
+                📋 {recoveryLog.length} pending logs
+              </span>
+            )}
+          </div>
+
+          {/* Reset */}
+          <button onClick={handleReset}
+            className="btn-scale px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-600 text-slate-300 text-xs font-semibold transition-all">
+            ↩️ Reset System
+          </button>
+        </div>
+      </header>
+
+      {/* ══════════════════════════════════════════
+          MAIN CONTENT
+      ══════════════════════════════════════════ */}
+      <main className="flex-1 max-w-screen-2xl mx-auto w-full p-4 md:p-6 flex flex-col gap-4">
+
+        {/* TOP ROW: Coordinator | Nodes | Recovery Log */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4" style={{minHeight:'420px'}}>
+
+          {/* ── COORDINATOR PANEL (col-3) ── */}
+          <div className="lg:col-span-3 bg-slate-900/80 border border-slate-700/50 rounded-2xl overflow-hidden flex flex-col">
+            {/* Header */}
+            <div className="px-5 py-3 bg-gradient-to-r from-blue-900/50 to-slate-900/50 border-b border-slate-700/40 flex items-center gap-2">
+              <span className="text-blue-400">🎛️</span>
+              <span className="font-bold text-sm text-blue-300">Coordinator</span>
+              <span className="ml-auto text-xs text-slate-500 mono">Transaction Manager</span>
+            </div>
+
+            <div className="p-4 flex flex-col gap-3 flex-1">
+              {/* Reference card */}
+              <div className="bg-blue-950/30 border border-blue-800/30 rounded-xl p-3">
+                <p className="text-xs text-blue-300 leading-relaxed">
+                  <span className="font-bold text-blue-200">ROWA-A §14.4:</span> Ghi lên <span className="text-yellow-400 font-semibold">TẤT CẢ</span> bản sao available. Node DOWN → bỏ qua, ghi Recovery Log.
+                </p>
+              </div>
+
+              {/* WRITE BUTTON */}
+              <button onClick={handleWrite}
+                className="btn-scale w-full px-4 py-4 rounded-xl font-bold text-sm transition-all
+                  bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-500 hover:to-violet-500
+                  text-white shadow-lg shadow-blue-900/50 border border-blue-500/30
+                  flex flex-col items-center gap-1.5">
+                <span className="text-2xl">✍️</span>
+                <span>Write All Available</span>
+                <span className="text-xs opacity-70 font-normal">Cập nhật tồn kho ngẫu nhiên</span>
+              </button>
+
+              {anyDown && (
+                <div className="bg-yellow-950/30 border border-yellow-700/30 rounded-xl p-2.5 text-xs text-yellow-400 text-center">
+                  ⚠️ {downCount} node DOWN → TX sẽ ghi vào Recovery Log
+                </div>
+              )}
+
+              {anyRecovering && (
+                <div className="bg-amber-900/40 border border-amber-600/50 rounded-xl p-2.5 text-xs text-amber-300 text-center">
+                  🔄 Node {Object.values(nodes).filter(n => n.status === NodeStatus.RECOVERING).map(n => n.id).join(', ')} đang RECOVERING — KHÔNG THỂ GHI TRỰC TIẾP, lần ghi này sẽ tự động ghi vào log
+                </div>
+              )}
+
+              {/* Divider */}
+              <div className="border-t border-slate-700/50 pt-3">
+                <p className="text-xs text-slate-500 mb-2.5 mono uppercase tracking-wider">Read One (§14.4)</p>
+                {/* READ BUTTONS */}
+                {['A','B','C'].map(id => (
+                  <button key={id} onClick={() => handleRead(id)}
+                    className={`btn-scale w-full mb-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-between
+                      ${nodes[id].status === NodeStatus.DOWN
+                        ? 'bg-slate-800/40 text-slate-600 cursor-not-allowed border border-slate-700/30'
+                        : nodes[id].status === NodeStatus.RECOVERING
+                        ? 'bg-yellow-950/40 border border-yellow-700/40 text-yellow-300 hover:bg-yellow-900/50'
+                        : 'bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 hover:border-slate-600'}`}>
+                    <span className="flex items-center gap-2">
+                      <span>📖</span>
+                      <span>Đọc Node {id}</span>
+                    </span>
+                    <span className="mono text-xs opacity-60">{nodes[id].status === NodeStatus.UP ? `${nodes[id].quantity}u` : nodes[id].status}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Protocol info */}
+              <div className="mt-auto bg-slate-800/40 rounded-xl p-3 border border-slate-700/30">
+                <p className="text-xs text-slate-400 leading-5">
+                  📚 <span className="text-violet-400 font-semibold">Textbook:</span> Özsu & Valduriez<br/>
+                  "Principles of Distributed Database Systems" 4th Ed.<br/>
+                  <span className="text-blue-400">§14.4</span> Available Copies Algorithm<br/>
+                  <span className="text-blue-400">§14.5</span> Site Recovery Protocol
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* ── NODES PANEL (col-6) ── */}
+          <div className="lg:col-span-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {['A','B','C'].map(id => (
+              <NodeCard
+                key={id}
+                node={nodes[id]}
+                onCrash={handleCrash}
+                onRestart={handleRestart}
+                onRead={handleRead}
+              />
+            ))}
+          </div>
+
+          {/* ── RECOVERY LOG PANEL (col-3) ── */}
+          <div className="lg:col-span-3">
+            <RecoveryLogPanel entries={recoveryLog}/>
+          </div>
+        </div>
+
+        {/* ══════════════════════════════════════════
+            SYSTEM TERMINAL LOG
+        ══════════════════════════════════════════ */}
+        <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden flex flex-col" style={{height:'260px'}}>
+          {/* Terminal header */}
+          <div className="px-4 py-2.5 bg-slate-900 border-b border-slate-800 flex items-center gap-2 flex-shrink-0">
+            {/* Mac dots */}
+            <div className="flex gap-1.5">
+              <div className="w-3 h-3 rounded-full bg-red-500 opacity-80"/>
+              <div className="w-3 h-3 rounded-full bg-yellow-500 opacity-80"/>
+              <div className="w-3 h-3 rounded-full bg-green-500 opacity-80"/>
+            </div>
+            <span className="ml-2 text-xs text-slate-500 mono">system_log — ROWA-A Terminal</span>
+            <button onClick={() => setTermLog([])}
+              className="ml-auto text-xs text-slate-600 hover:text-slate-400 mono transition-colors">
+              clear
+            </button>
+          </div>
+
+          {/* Terminal output */}
+          <div ref={termRef} className="flex-1 overflow-y-auto p-4 space-y-0.5 bg-slate-950">
+            {termLog.map((entry, i) => <TermLine key={i} entry={entry}/>)}
+            {/* Blinking cursor */}
+            <div className="flex items-center gap-1 mt-1">
+              <span className="t-green mono text-xs">$</span>
+              <span className="w-2 h-4 bg-green-400 opacity-70 animate-pulse"/>
+            </div>
+          </div>
+        </div>
+
+        {/* ══════════════════════════════════════════
+            STATE MACHINE REFERENCE
+        ══════════════════════════════════════════ */}
+        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-purple-400 text-sm">🔀</span>
+            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Node State Machine (Özsu §14.5)</span>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* States */}
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 rounded-full bg-emerald-950/60 border border-emerald-700/40 text-emerald-400 text-xs mono font-bold">READY/UP</span>
+              <span className="text-slate-600 text-sm">→</span>
+              <span className="px-3 py-1 rounded-full bg-red-950/60 border border-red-700/40 text-red-400 text-xs mono font-bold">DOWN</span>
+              <span className="text-slate-600 text-sm">→</span>
+              <span className="px-3 py-1 rounded-full bg-yellow-950/60 border border-yellow-700/40 text-yellow-400 text-xs mono font-bold recovering-pulse">RECOVERING</span>
+              <span className="text-slate-600 text-sm">→</span>
+              <span className="px-3 py-1 rounded-full bg-emerald-950/60 border border-emerald-700/40 text-emerald-400 text-xs mono font-bold">SYNCED/UP</span>
+            </div>
+            <div className="ml-auto flex gap-4 text-xs text-slate-500 flex-wrap">
+              <span><span className="text-red-400">💥 Crash:</span> UP→DOWN</span>
+              <span><span className="text-yellow-400">🔄 Restart:</span> DOWN→RECOVERING ({(RECOVERY_DELAY_MS/1000).toFixed(1)}s catch-up)</span>
+              <span><span className="text-emerald-400">✅ Synced:</span> RECOVERING→UP</span>
+              <span><span className="text-red-400">🚨 Stale Read:</span> Blocked khi RECOVERING</span>
+            </div>
+          </div>
+        </div>
+
+      </main>
+
+      {/* FOOTER */}
+      <footer className="border-t border-slate-800/50 py-3 px-6 text-center">
+        <p className="text-xs text-slate-600 mono">
+          ROWA-A Warehouse Inventory Simulator · Đề tài 42 CSDL Phân tán · 
+          Ref: Özsu & Valduriez "Principles of DDBS" 4th Ed. §14.4, §14.5
+        </p>
+      </footer>
+    </div>
+  );
+}
+
+/* ─── MOUNT ──────────────────────────────────────────────────────────────── */
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App/>);
+</script>
+</body>
+</html>

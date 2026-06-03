@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.env
+venv/
+env/
+.venv/
+.idea/
+.vscode/
+
+# Ignore Docker volumes data
+data/
+coordinator/data/
+node/data/

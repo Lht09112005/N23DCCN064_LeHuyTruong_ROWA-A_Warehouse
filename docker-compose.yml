@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  coordinator:
+    build:
+      context: .
+      dockerfile: coordinator/Dockerfile
+    container_name: rowa_coordinator
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - NODE_URLS=A:http://node-a:5001,B:http://node-b:5002,C:http://node-c:5003
+      - FLASK_ENV=production
+    volumes:
+      - data_coord:/app/data
+    networks:
+      - rowa-network
+    depends_on:
+      - node-a
+      - node-b
+      - node-c
+
+  node-a:
+    build:
+      context: .
+      dockerfile: node/Dockerfile
+    container_name: rowa_node_a
+    ports:
+      - "5001:5001"
+    environment:
+      - NODE_ID=A
+      - PORT=5001
+      - FLASK_ENV=production
+    volumes:
+      - data_a:/app/data
+    networks:
+      - rowa-network
+
+  node-b:
+    build:
+      context: .
+      dockerfile: node/Dockerfile
+    container_name: rowa_node_b
+    ports:
+      - "5002:5002"
+    environment:
+      - NODE_ID=B
+      - PORT=5002
+      - FLASK_ENV=production
+    volumes:
+      - data_b:/app/data
+    networks:
+      - rowa-network
+
+  node-c:
+    build:
+      context: .
+      dockerfile: node/Dockerfile
+    container_name: rowa_node_c
+    ports:
+      - "5003:5003"
+    environment:
+      - NODE_ID=C
+      - PORT=5003
+      - FLASK_ENV=production
+    volumes:
+      - data_c:/app/data
+    networks:
+      - rowa-network
+
+networks:
+  rowa-network:
+    driver: bridge
+
+volumes:
+  data_coord:
+  data_a:
+  data_b:
+  data_c:
