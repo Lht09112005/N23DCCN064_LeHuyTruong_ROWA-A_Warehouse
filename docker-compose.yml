@@ -10,62 +10,102 @@ services:
       - "5000:5000"
     environment:
       - PORT=5000
-      - NODE_URLS=A:http://node-a:5001,B:http://node-b:5002,C:http://node-c:5003
+      - NODE_URLS=WHBDG:http://node-whbdg:5001,WHDPS:http://node-whdps:5002,WHJKT:http://node-whjkt:5003,WHSBY:http://node-whsby:5004,WHMDN:http://node-whmdn:5005
       - FLASK_ENV=production
     volumes:
       - data_coord:/app/data
+      - ./coordinator/static:/app/static
     networks:
       - rowa-network
     depends_on:
-      - node-a
-      - node-b
-      - node-c
+      - node-whbdg
+      - node-whdps
+      - node-whjkt
+      - node-whsby
+      - node-whmdn
 
-  node-a:
+  node-whbdg:
     build:
       context: .
       dockerfile: node/Dockerfile
-    container_name: rowa_node_a
+    container_name: rowa_node_whbdg
     ports:
       - "5001:5001"
     environment:
-      - NODE_ID=A
+      - NODE_ID=WHBDG
       - PORT=5001
       - FLASK_ENV=production
     volumes:
-      - data_a:/app/data
+      - data_whbdg:/app/data
+      - ./node/static:/app/static
     networks:
       - rowa-network
 
-  node-b:
+  node-whdps:
     build:
       context: .
       dockerfile: node/Dockerfile
-    container_name: rowa_node_b
+    container_name: rowa_node_whdps
     ports:
       - "5002:5002"
     environment:
-      - NODE_ID=B
+      - NODE_ID=WHDPS
       - PORT=5002
       - FLASK_ENV=production
     volumes:
-      - data_b:/app/data
+      - data_whdps:/app/data
+      - ./node/static:/app/static
     networks:
       - rowa-network
 
-  node-c:
+  node-whjkt:
     build:
       context: .
       dockerfile: node/Dockerfile
-    container_name: rowa_node_c
+    container_name: rowa_node_whjkt
     ports:
       - "5003:5003"
     environment:
-      - NODE_ID=C
+      - NODE_ID=WHJKT
       - PORT=5003
       - FLASK_ENV=production
     volumes:
-      - data_c:/app/data
+      - data_whjkt:/app/data
+      - ./node/static:/app/static
+    networks:
+      - rowa-network
+
+  node-whsby:
+    build:
+      context: .
+      dockerfile: node/Dockerfile
+    container_name: rowa_node_whsby
+    ports:
+      - "5004:5004"
+    environment:
+      - NODE_ID=WHSBY
+      - PORT=5004
+      - FLASK_ENV=production
+    volumes:
+      - data_whsby:/app/data
+      - ./node/static:/app/static
+    networks:
+      - rowa-network
+
+  node-whmdn:
+    build:
+      context: .
+      dockerfile: node/Dockerfile
+    container_name: rowa_node_whmdn
+    ports:
+      - "5005:5005"
+    environment:
+      - NODE_ID=WHMDN
+      - PORT=5005
+      - FLASK_ENV=production
+    volumes:
+      - data_whmdn:/app/data
+      - ./node/static:/app/static
     networks:
       - rowa-network
 
@@ -75,6 +115,8 @@ networks:
 
 volumes:
   data_coord:
-  data_a:
-  data_b:
-  data_c:
+  data_whbdg:
+  data_whdps:
+  data_whjkt:
+  data_whsby:
+  data_whmdn:

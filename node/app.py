@@ -12,7 +12,7 @@ CORS(app)
 # ─────────────────────────────────────────────────────────────────────────────
 # ENVIRONMENT & STATE
 # ─────────────────────────────────────────────────────────────────────────────
-NODE_ID = os.environ.get("NODE_ID", "A")
+NODE_ID = os.environ.get("NODE_ID", "WHBDG")
 PORT = int(os.environ.get("PORT", 5001))
 
 DATA_DIR = "/app/data"
@@ -40,7 +40,7 @@ def update_stock_quantity(sku, qty):
     stock.append({
         "SKU": sku,
         "Quantity": qty,
-        "WarehouseID": NODE_ID
+        "WarehouseID": "UNKNOWN"
     })
 
 lock = threading.Lock()
@@ -87,46 +87,39 @@ def init_default_stock():
         try:
             import csv
             new_stock = []
-            with open(csv_path, "r", encoding="utf-8") as f:
+            with open(csv_path, "r", encoding="utf-8-sig") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    # Support both Store ID/Product ID and WarehouseID/SKU column headers
-                    wh_id = row.get("Store ID") or row.get("WarehouseID")
-                    sku = row.get("Product ID") or row.get("SKU")
-                    qty_str = row.get("Inventory Level") or row.get("Quantity")
+                    # Support new dataset columns: SKU_ID, Warehouse, Quantity_On_Hand
+                    sku = row.get("SKU_ID") or row.get("Product ID") or row.get("SKU")
+                    wh_id = row.get("Warehouse") or row.get("Warehouse_ID") or row.get("Store ID") or row.get("WarehouseID")
+                    qty_str = row.get("Quantity_On_Hand") or row.get("Inventory Level") or row.get("Quantity")
                     
-                    if not wh_id or not sku or not qty_str:
+                    if not sku or not qty_str:
                         continue
                         
                     qty = int(qty_str)
                     
-                    # Option 1: Replicated View. 
-                    # We load S001's quantities as the master replica data for all Nodes.
-                    # This ensures all warehouse replicas start in a perfectly synchronized, consistent state!
-                    if wh_id.strip() == "S001":
-                        new_stock.append({
-                            "SKU": sku.strip(),
-                            "Quantity": qty,
-                            "WarehouseID": NODE_ID
-                        })
+                    # Fully Replicated: We load ALL rows into the node.
+                    new_stock.append({
+                        "SKU": sku.strip(),
+                        "Quantity": qty,
+                        "WarehouseID": wh_id.strip() if wh_id else "UNKNOWN"
+                    })
             if new_stock:
-                # Deduplicate by keeping only the LATEST (last) unique SKU value
-                deduped = {}
-                for item in new_stock:
-                    deduped[item["SKU"]] = item
-                stock = list(deduped.values())
+                stock = new_stock
                 last_tx_id = 0
                 save_stock()
-                log(f"Successfully loaded {len(stock)} unique items from external CSV dataset: {csv_path}")
+                log(f"Successfully loaded {len(stock)} items from external CSV dataset: {csv_path}")
                 return
         except Exception as e:
             log(f"Error reading external CSV dataset, falling back to default: {e}", "WARNING")
 
     # Fallback to default small dataset
     stock = [
-        {"SKU": "sku001", "Quantity": 223, "WarehouseID": NODE_ID},
-        {"SKU": "sku002", "Quantity": 217, "WarehouseID": NODE_ID},
-        {"SKU": "sku003", "Quantity": 69, "WarehouseID": NODE_ID}
+        {"SKU": "SKU0001", "Quantity": 359, "WarehouseID": "WHBDG"},
+        {"SKU": "SKU0002", "Quantity": 314, "WarehouseID": "WHDPS"},
+        {"SKU": "SKU0004", "Quantity": 281, "WarehouseID": "WHJKT"}
     ]
     last_tx_id = 0
     save_stock()
@@ -168,7 +161,7 @@ def get_status():
         return jsonify({
             "node_id": NODE_ID,
             "status": state,
-            "quantity": get_stock_quantity("sku001"),
+            "quantity": get_stock_quantity("SKU0001"),
             "lastTxId": last_tx_id,
             "recoverProgress": recover_progress,
             "dataset": stock  # Return full relational dataset schema Stock_Levels(SKU, Quantity, WarehouseID)
@@ -210,7 +203,7 @@ def read_data():
                 "reason": "Node is currently replaying WAL in RECOVERING state. Reads are disabled until catch-up is complete."
             }), 400
  
-        sku = request.args.get("sku", "sku001")
+        sku = request.args.get("sku", "SKU0001")
         qty = get_stock_quantity(sku)
         log(f"Served READ for {sku} -> Quantity={qty} (State={state})", "SUCCESS")
         return jsonify({
@@ -231,7 +224,7 @@ def write_data():
 
         data = request.json or {}
         tx_id = data.get("tx_id")
-        sku = data.get("sku", "sku001")
+        sku = data.get("sku", "SKU0001")
         delta = data.get("delta")
 
         if not tx_id or delta is None:
@@ -262,6 +255,17 @@ def write_data():
             "old_qty": old_qty,
             "new_qty": new_qty
         })
+
+@app.route("/proxy_write", methods=["POST"])
+def proxy_write():
+    """Proxy endpoint for Node UI to send writes to the Coordinator."""
+    coordinator_url = os.environ.get("COORDINATOR_URL", "http://coordinator:5000")
+    try:
+        resp = requests.post(f"{coordinator_url}/api/write", json=request.json, timeout=2.0)
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        log(f"Proxy write to coordinator failed: {e}", "WARNING")
+        return jsonify({"error": f"Không thể kết nối đến Trạm Điều Phối: {e}"}), 500
 
 @app.route("/crash", methods=["POST"])
 def crash():
@@ -311,7 +315,7 @@ def run_recovery_process():
             tx_id = tx.get("txId")
             old_val = tx.get("oldQty", 100)
             new_val = tx.get("newQty", 100)
-            sku = tx.get("sku", "sku001")
+            sku = tx.get("sku", "SKU0001")
             
             if tx_id > last_tx_id:
                 log(f"Applying log entry during recovery catch-up: TX-{tx_id:03d} ({sku} {old_val}->{new_val})")

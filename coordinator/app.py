@@ -13,7 +13,7 @@ CORS(app)
 # ENVIRONMENT & STATE
 # ─────────────────────────────────────────────────────────────────────────────
 PORT = int(os.environ.get("PORT", 5000))
-NODE_URLS_RAW = os.environ.get("NODE_URLS", "A:http://node-a:5001,B:http://node-b:5002,C:http://node-c:5003")
+NODE_URLS_RAW = os.environ.get("NODE_URLS", "WHBDG:http://node-whbdg:5001,WHDPS:http://node-whdps:5002,WHJKT:http://node-whjkt:5003,WHSBY:http://node-whsby:5004,WHMDN:http://node-whmdn:5005")
 
 # Parse nodes urls (e.g. {"A": "http://node-a:5001", ...})
 NODES = {}
@@ -105,7 +105,7 @@ def write_transaction():
     global tx_counter, recovery_log
     
     data = request.json or {}
-    sku = data.get("sku", "sku001")
+    sku = data.get("sku", "SKU0001")
     delta = data.get("delta")
     
     if delta is None:
@@ -206,7 +206,7 @@ def write_transaction():
 @app.route("/api/read", methods=["GET"])
 def read_transaction():
     node_id = request.args.get("node_id")
-    sku = request.args.get("sku", "sku001")
+    sku = request.args.get("sku", "SKU0001")
     
     if not node_id or node_id not in NODES:
         return jsonify({"error": "Invalid node_id"}), 400
@@ -238,7 +238,7 @@ def get_missed_txs():
             if node_id in entry.get("missedBy", []):
                 missed.append({
                     "txId": entry["txId"],
-                    "sku": entry.get("sku", "sku001"),
+                    "sku": entry.get("sku", "SKU0001"),
                     "oldQty": entry["oldQty"],
                     "newQty": entry["newQty"]
                 })

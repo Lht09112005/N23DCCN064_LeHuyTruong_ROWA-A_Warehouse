@@ -1,85 +1,202 @@
-# Distributed Database System (ROWA)
+# 🏭 ROWA-A Warehouse Inventory Simulator
+### Hệ thống Mô phỏng Kho hàng Phân tán — Giao thức ROWA-Available
 
-This is a demonstration project for a Distributed Database System using the **ROWA (Read One Write All)** protocol. The system consists of a `Coordinator` and multiple distributed `Nodes` (A, B, and C). They communicate over a network using HTTP REST APIs built with Python and Flask.
+> **Đề tài #42 — Môn Cơ sở Dữ liệu Phân tán**  
+> Mô phỏng giao thức **ROWA-A (Read-One Write-All Available)** trên hệ thống kho hàng 5 nút phân tán, kết hợp cơ chế WAL, Recovery Log và Stale Read Prevention.
 
-## Architecture
+---
 
-- **Coordinator (Port 5000):** Manages requests from clients and coordinates transactions/syncs data across the nodes.
-- **Node A (Port 5001):** Distributed database node A.
-- **Node B (Port 5002):** Distributed database node B.
-- **Node C (Port 5003):** Distributed database node C.
+## 📐 Kiến trúc hệ thống
 
-## Prerequisites
-
-- **Docker** and **Docker Desktop** (Recommended)
-- **Python 3.x** (If running without Docker)
-
-## How to Run (Recommended)
-
-The easiest and most reliable way to run this project is using Docker Compose. This automatically sets up the networking and environment variables for all 4 services.
-
-1. Make sure Docker Desktop is running.
-2. Open a terminal in the root directory of this project.
-3. Run the following command:
-
-```bash
-docker-compose up --build
+```
+                    ┌─────────────────────────────┐
+   Client / UI ────►│   COORDINATOR  (:5000)       │
+                    │   - Điều phối giao dịch       │
+                    │   - Quản lý Recovery Log      │
+                    │   - Mutex Lock toàn cục       │
+                    └────────────┬────────────────┘
+                                 │ ROWA-A Write
+              ┌──────────────────┼──────────────────┐
+              ▼                  ▼                   ▼
+      ┌──────────────┐  ┌──────────────┐   ┌──────────────┐
+      │ WHBDG :5001  │  │ WHDPS :5002  │   │ WHJKT :5003  │
+      │ Kho Bandung  │  │ Kho Depok    │   │ Kho Jakarta  │
+      │  stock.json  │  │  stock.json  │   │  stock.json  │
+      │  wal.jsonl   │  │  wal.jsonl   │   │  wal.jsonl   │
+      └──────────────┘  └──────────────┘   └──────────────┘
+              ┌──────────────────┐
+              ▼                  ▼
+      ┌──────────────┐  ┌──────────────┐
+      │ WHSBY :5004  │  │ WHMDN :5005  │
+      │ Kho Surabaya │  │ Kho Medan    │
+      │  stock.json  │  │  stock.json  │
+      │  wal.jsonl   │  │  wal.jsonl   │
+      └──────────────┘  └──────────────┘
 ```
 
-4. Once the containers are up and running, you can access the coordinator and nodes at:
-   - Coordinator: `http://localhost:5000`
-   - Node A: `http://localhost:5001`
-   - Node B: `http://localhost:5002`
-   - Node C: `http://localhost:5003`
-5. You can also view the frontend UI by opening the `index.html` file in your browser.
+### 5 Kho hàng (Nodes)
 
-## How to Run (Directly without Docker)
+| Container | Node ID | Cổng | Kho |
+|---|---|---|---|
+| `rowa_coordinator` | — | **:5000** | Trạm điều phối trung tâm |
+| `rowa_node_whbdg`  | WHBDG | **:5001** | Kho Bandung |
+| `rowa_node_whdps`  | WHDPS | **:5002** | Kho Depok |
+| `rowa_node_whjkt`  | WHJKT | **:5003** | Kho Jakarta |
+| `rowa_node_whsby`  | WHSBY | **:5004** | Kho Surabaya |
+| `rowa_node_whmdn`  | WHMDN | **:5005** | Kho Medan |
 
-If you prefer to run the project natively, you will need to open 4 separate terminals.
+---
 
-1. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+## 🗂️ Cấu trúc thư mục
 
-2. **Run Node A:**
-   ```bash
-   cd node
-   set PORT=5001
-   set NODE_ID=A
-   python app.py
-   ```
+```
+ROWA-A_Project/
+│
+├── docker-compose.yml          # Định nghĩa và kết nối 6 container
+├── requirements.txt            # Thư viện Python: Flask, requests, flask-cors
+├── test_concurrency.py         # Script test đồng thời
+│
+├── coordinator/
+│   ├── Dockerfile
+│   ├── app.py                  # Backend Coordinator — ROWA-A, Recovery Log, Lock
+│   └── static/
+│       └── index.html          # Giao diện điều khiển toàn hệ thống (React)
+│
+└── node/
+    ├── Dockerfile
+    ├── app.py                  # Backend Node — WAL, State Machine, Stale Read Prevention
+    ├── stock_levels.csv        # Dataset tồn kho khởi tạo
+    └── static/
+        └── index.html          # Giao diện từng kho hàng (React)
+```
 
-3. **Run Node B:**
-   ```bash
-   cd node
-   set PORT=5002
-   set NODE_ID=B
-   python app.py
-   ```
+---
 
-4. **Run Node C:**
-   ```bash
-   cd node
-   set PORT=5003
-   set NODE_ID=C
-   python app.py
-   ```
+## ⚙️ Yêu cầu hệ thống
 
-5. **Run Coordinator:**
-   ```bash
-   cd coordinator
-   set PORT=5000
-   set NODE_URLS=A:http://localhost:5001,B:http://localhost:5002,C:http://localhost:5003
-   python app.py
-   ```
+- **Docker Desktop** (khuyến nghị) — [Tải tại đây](https://www.docker.com/products/docker-desktop)
+- **Python 3.11+** (nếu chạy không dùng Docker)
 
-## Testing Concurrency
+---
 
-A test script is provided to simulate concurrent requests and test the system's consistency and lock mechanisms.
-
-Make sure the system is running (either via Docker or natively), then open a new terminal and run:
+## 🚀 Khởi động (Khuyến nghị — Docker)
 
 ```bash
+# 1. Clone repo
+git clone https://github.com/Lht09112005/ROWA-A_Project.git
+cd ROWA-A_Project
+
+# 2. Khởi động toàn bộ hệ thống (6 container)
+docker-compose up -d --build
+
+# 3. Xem log realtime (tuỳ chọn)
+docker-compose logs -f
+```
+
+Sau khi khởi động, truy cập:
+
+| Giao diện | URL |
+|---|---|
+| 🖥️ **Coordinator** (Bảng điều khiển chính) | http://localhost:5000 |
+| 📦 Kho WHBDG | http://localhost:5001 |
+| 📦 Kho WHDPS | http://localhost:5002 |
+| 📦 Kho WHJKT | http://localhost:5003 |
+| 📦 Kho WHSBY | http://localhost:5004 |
+| 📦 Kho WHMDN | http://localhost:5005 |
+
+```bash
+# Dừng hệ thống
+docker-compose down
+
+# Dừng và xóa toàn bộ dữ liệu
+docker-compose down -v
+```
+
+---
+
+## 🖥️ Khởi động thủ công (không dùng Docker)
+
+Cài thư viện:
+```bash
+pip install -r requirements.txt
+```
+
+Mở **6 terminal riêng biệt** và chạy lần lượt:
+
+```bash
+# Terminal 1 — Kho WHBDG
+cd node && set NODE_ID=WHBDG && set PORT=5001 && python app.py
+
+# Terminal 2 — Kho WHDPS
+cd node && set NODE_ID=WHDPS && set PORT=5002 && python app.py
+
+# Terminal 3 — Kho WHJKT
+cd node && set NODE_ID=WHJKT && set PORT=5003 && python app.py
+
+# Terminal 4 — Kho WHSBY
+cd node && set NODE_ID=WHSBY && set PORT=5004 && python app.py
+
+# Terminal 5 — Kho WHMDN
+cd node && set NODE_ID=WHMDN && set PORT=5005 && python app.py
+
+# Terminal 6 — Coordinator (khởi động SAU các Node)
+cd coordinator
+set PORT=5000
+set NODE_URLS=WHBDG:http://localhost:5001,WHDPS:http://localhost:5002,WHJKT:http://localhost:5003,WHSBY:http://localhost:5004,WHMDN:http://localhost:5005
+python app.py
+```
+
+---
+
+## 🔬 Các tính năng có thể demo
+
+| Tính năng | Mô tả |
+|---|---|
+| **Giao dịch ghi ROWA-A** | Ghi đến tất cả Node UP, bỏ qua Node DOWN |
+| **Giả lập sập Node** | Nhấn "Crash" trên giao diện để Node chuyển sang DOWN |
+| **Phục hồi WAL** | Nhấn "Recover" — Node tự fetch missed TXs và replay WAL |
+| **Stale Read Prevention** | Node RECOVERING từ chối đọc (HTTP 400) |
+| **Recovery Log** | Coordinator lưu các TX bị lỡ, tự dọn sau khi Node phục hồi |
+| **Proxy Write** | Ghi từ giao diện Node → forward tự động đến Coordinator |
+
+---
+
+## 📊 Tính sẵn sàng lý thuyết
+
+| Giao thức | Công thức | n=5, p=0.9 |
+|---|---|---|
+| **ROWA chuẩn** | $A = p^n$ | **59.05%** |
+| **ROWA-A** | $A = 1-(1-p)^n$ | **99.999% (Five Nines)** |
+
+---
+
+## 🧰 Công nghệ sử dụng
+
+| Lớp | Công nghệ |
+|---|---|
+| **Backend** | Python 3.11 + Flask 3.0 |
+| **Giao tiếp** | HTTP REST API (requests) |
+| **Frontend** | React 18 (CDN) + Tailwind CSS |
+| **Persistence** | JSON file (`stock.json`, `wal.jsonl`, `coordinator_state.json`) |
+| **Containerization** | Docker + Docker Compose |
+| **Concurrency** | `threading.Lock()` |
+
+---
+
+## 🧪 Test đồng thời
+
+```bash
+# Đảm bảo hệ thống đang chạy trước
 python test_concurrency.py
 ```
+
+Script gửi nhiều request ghi đồng thời để kiểm tra cơ chế Mutex Lock và tính nhất quán dữ liệu.
+
+---
+
+## 📚 Tham chiếu lý thuyết
+
+- **ROWA-A Protocol** — Özsu & Valduriez, §6.3 / §14.4
+- **Write-Ahead Logging** — Özsu & Valduriez, §5.4
+- **Stale Read Prevention** — Özsu & Valduriez, §14.5.3
+- **1-Copy Serializability** — Özsu & Valduriez, §6.1

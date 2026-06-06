@@ -1,13 +1,26 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
 .env
 venv/
 env/
 .venv/
+
+# IDE
 .idea/
 .vscode/
 
-# Ignore Docker volumes data
+# Docker volume data
 data/
 coordinator/data/
 node/data/
+
+# Runtime artifacts
+status.json
+
+# Root-level index.html (không phải static của coordinator/node)
+/index.html
+
+# Document folder — tài liệu báo cáo, không cần để chạy dự án
+Document/

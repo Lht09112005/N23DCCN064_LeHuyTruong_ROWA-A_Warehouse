@@ -9,7 +9,7 @@ def get_current_sku_qty(sku):
         res = requests.get(f"{COORDINATOR_URL}/api/status")
         data = res.json()
         # Find quantity in node A's dataset
-        dataset = data["nodes"]["A"].get("dataset", [])
+        dataset = data["nodes"]["WHBDG"].get("dataset", [])
         for item in dataset:
             if item["SKU"] == sku:
                 return item["Quantity"]
@@ -36,7 +36,7 @@ def send_write_request(thread_name, sku, old_qty, increment):
         print(f"[{thread_name}] THẤT BẠI: {res.text}")
 
 if __name__ == "__main__":
-    target_sku = "SKU001"
+    target_sku = "SKU0001"
     
     print("=== BÀI TEST LOST UPDATE (CONCURRENCY) ===")
     

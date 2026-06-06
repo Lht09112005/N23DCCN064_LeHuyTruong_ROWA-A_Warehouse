@@ -2,354 +2,411 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Node Portal - ROWA-A Distributed System</title>
-
-  <!-- CDN DEPENDENCIES -->
+  <title>Trạm Kho Hàng</title>
+  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React 18 + ReactDOM + Babel -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
-
-  <!-- Google Font -->
-  <link rel="preconnect" href="https://fonts.googleapis.com"/>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+  <script crossorigin src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
 
   <style>
-    *, *::before, *::after { box-sizing: border-box; }
-    body {
-      font-family: 'Inter', sans-serif;
-      background: #f8fafc;
-      color: #334155;
-      min-height: 100vh;
-      overflow-x: hidden;
-    }
-    .mono { font-family: 'JetBrains Mono', monospace; }
-
-    /* Dynamic Glow Effects */
-    .glow-theme { box-shadow: 0 8px 20px -5px var(--theme-glow, rgba(59,130,246,0.2)), 0 4px 10px -3px var(--theme-glow, rgba(59,130,246,0.1)); }
-    .bg-theme-grad { background-image: linear-gradient(to right, var(--theme-color-dark), #ffffff); }
-    .text-theme { color: var(--theme-color); }
-    .border-theme { border-color: var(--theme-color); }
-    .btn-theme { 
-        background: linear-gradient(to right, var(--theme-color), var(--theme-color-hover)); 
-        box-shadow: 0 4px 12px var(--theme-glow);
-    }
-    .btn-theme:hover { filter: brightness(1.05); }
-
-    @keyframes pulse-border {
-      0%,100% { box-shadow: 0 0 0 0 rgba(234,179,8,0.6), 0 0 10px rgba(234,179,8,0.1); }
-      50%     { box-shadow: 0 0 0 4px rgba(234,179,8,0.1),  0 0 20px rgba(234,179,8,0.3); }
-    }
-    .recovering-pulse { animation: pulse-border 1.2s ease infinite; }
-
-    .grid-bg {
-      background-image:
-        linear-gradient(rgba(148,163,184,0.15) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(148,163,184,0.15) 1px, transparent 1px);
-      background-size: 40px 40px;
-    }
-
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #f1f5f9; }
-    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius:3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-
-    .node-up       { border-color: rgba(34,197,94,0.4);  }
-    .node-down     { border-color: rgba(239,68,68,0.4);  }
-    .node-recovering{ border-color: rgba(234,179,8,0.5); }
+    body { background-color: #f8fafc; color: #0f172a; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
     
-    @keyframes slideIn { from {opacity:0; transform:translateY(-10px);} to {opacity:1; transform:translateY(0);} }
-    .animate-slide-in { animation: slideIn 0.4s ease-out forwards; }
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
   </style>
-
 </head>
-<body class="grid-bg">
+<body class="min-h-screen">
+
 <div id="root"></div>
 
 <script type="text/babel">
-const { useState, useEffect, useRef } = React;
+  const { useState, useEffect, useCallback, useRef } = React;
 
-// Global settings
-const COORDINATOR_URL = "http://localhost:5000";
+  const App = () => {
+    const [nodeData, setNodeData] = useState(null);
+    const [walData, setWalData] = useState([]);
+    const [selectedSku, setSelectedSku] = useState("SKU0001");
+    const [deltaValue, setDeltaValue] = useState("");
+    const [isOffline, setIsOffline] = useState(false); // To detect if node is unreachable from UI
+    const [readResult, setReadResult] = useState(null); // { type: 'success'|'error', title: string, message: string, details?: any }
 
-const THEMES = {
-    "A": { color: "#3b82f6", hover: "#2563eb", dark: "rgba(59,130,246,0.05)", glow: "rgba(59,130,246,0.2)" }, // Blue
-    "B": { color: "#8b5cf6", hover: "#7c3aed", dark: "rgba(139,92,246,0.05)", glow: "rgba(139,92,246,0.2)" }, // Purple
-    "C": { color: "#ec4899", hover: "#db2777", dark: "rgba(236,72,153,0.05)", glow: "rgba(236,72,153,0.2)" }, // Pink
-    "DEFAULT": { color: "#10b981", hover: "#059669", dark: "rgba(16,185,129,0.05)", glow: "rgba(16,185,129,0.2)" }
-};
-
-const NodePortal = () => {
-    const [nodeId, setNodeId] = useState("?");
-    const [status, setStatus] = useState("UP");
-    const [dataset, setDataset] = useState([]);
-    const [wal, setWal] = useState([]);
-    const [lastTx, setLastTx] = useState(0);
-    const [progress, setProgress] = useState(0);
-    const [txAmt, setTxAmt] = useState(5);
-    const [selectedSku, setSelectedSku] = useState("sku001");
-    const [uiMsg, setUiMsg] = useState(null); // Message for local UI
-    
-    const showUiMsg = (type, text) => {
-        setUiMsg({ type, text });
-        setTimeout(() => setUiMsg(null), 5000);
-    };
-
-    const fetchState = async () => {
-        try {
-            const res = await fetch("/api/status");
-            if(res.status === 503) {
-                setStatus("DOWN");
-                return; // Can't fetch details if down
-            }
-            if (res.ok) {
-                const data = await res.json();
-                setNodeId(data.node_id);
-                setStatus(data.status);
-                setDataset(data.dataset || []);
-                setLastTx(data.lastTxId);
-                setProgress(data.recoverProgress || 0);
-            }
-            
-            const walRes = await fetch("/api/wal");
-            if (walRes.ok) {
-                const walData = await walRes.json();
-                setWal(walData.wal || []);
-            }
-        } catch(e) {
-            console.error("Error fetching state:", e);
-        }
-    };
-
-    useEffect(() => {
-        fetchState();
-        const interval = setInterval(fetchState, 1000);
-        return () => clearInterval(interval);
+    const fetchStatus = useCallback(() => {
+      fetch('/status')
+        .then(res => {
+          if (!res.ok && res.status !== 503) throw new Error('Network error');
+          return res.json();
+        })
+        .then(data => {
+          setIsOffline(false);
+          // 503 from backend returns {"error": "Node DOWN"}
+          if (data.error === "Node DOWN") {
+            setNodeData(prev => prev ? { ...prev, status: "DOWN" } : { status: "DOWN", node_id: "UNKNOWN" });
+          } else {
+            setNodeData(data);
+          }
+        })
+        .catch(err => {
+          setIsOffline(true);
+        });
     }, []);
 
-    // Update CSS variables based on Node ID
+    const fetchWal = useCallback(() => {
+      fetch('/api/wal')
+        .then(res => res.json())
+        .then(data => {
+          setWalData(data.wal || []);
+        })
+        .catch(err => console.error(err));
+    }, []);
+
     useEffect(() => {
-        const theme = THEMES[nodeId] || THEMES["DEFAULT"];
-        document.documentElement.style.setProperty('--theme-color', theme.color);
-        document.documentElement.style.setProperty('--theme-color-hover', theme.hover);
-        document.documentElement.style.setProperty('--theme-color-dark', theme.dark);
-        document.documentElement.style.setProperty('--theme-glow', theme.glow);
-        document.title = `Warehouse ${nodeId} - Portal`;
-    }, [nodeId]);
+      fetchStatus();
+      fetchWal();
+      const interval = setInterval(() => {
+        fetchStatus();
+        fetchWal();
+      }, 2000);
+      return () => clearInterval(interval);
+    }, [fetchStatus, fetchWal]);
 
-    const isUp = status === 'UP' || status === 'SYNCED';
-    const isDown = status === 'DOWN';
-    const isRecovering = status === 'RECOVERING';
+    // Derived states
+    const isDown = nodeData && nodeData.status === "DOWN";
+    const isRecovering = nodeData && nodeData.status === "RECOVERING";
+    const isUp = nodeData && nodeData.status === "UP";
+    const nodeId = nodeData ? nodeData.node_id : "LOADING...";
 
-    const handleWrite = async () => {
-        if (isDown) return showUiMsg('error', '💥 Node đang DOWN - Không thể kết nối!');
-        if (isRecovering) return showUiMsg('warning', '⚠️ KHÔNG THỂ GHI TRỰC TIẾP: Node đang RECOVERING. Mọi yêu cầu ghi mới đều bị chặn để đảm bảo nhất quán. Vui lòng gửi yêu cầu ghi qua Coordinator để hệ thống tự điều phối.');
-        
-        try {
-            // Fix Lost Update: Send delta instead of absolute new value
-            const res = await fetch(`${COORDINATOR_URL}/api/write`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sku: selectedSku, delta: txAmt })
+    // Actions
+    const handleCrash = () => {
+      fetch('/crash', { method: 'POST' }).then(() => {
+        fetchStatus();
+      });
+    };
+
+    const handleRecover = () => {
+      fetch('/recover', { method: 'POST' }).then(() => {
+        fetchStatus();
+      });
+    };
+
+    const handleLocalRead = () => {
+      fetch(`/read?sku=${selectedSku}`)
+        .then(res => res.json().then(data => ({status: res.status, body: data})))
+        .then(({status, body}) => {
+          if (status !== 200) {
+            setReadResult({
+              type: 'error',
+              title: 'Từ Chối Truy Vấn',
+              message: body.error || body.reason || 'Unknown error'
             });
-            if(res.ok) {
-                showUiMsg('success', '✅ Đã gửi yêu cầu Ghi thành công qua Coordinator');
-                fetchState();
-            } else {
-                showUiMsg('error', "❌ Write failed: " + await res.text());
-            }
-        } catch (e) {
-            showUiMsg('error', "❌ Error: " + e.message);
+          } else {
+            setReadResult({
+              type: 'success',
+              title: `Kết Quả Truy Vấn (Kho ${nodeId})`,
+              message: 'Dữ liệu đọc thành công từ cơ sở dữ liệu cục bộ.',
+              details: [
+                { label: 'Mã Hàng (SKU)', value: body.sku },
+                { label: 'Số Lượng', value: body.quantity },
+                { label: 'Phiên Bản (TX)', value: `TX-${String(body.lastTxId).padStart(3, '0')}` }
+              ]
+            });
+          }
+        })
+        .catch(err => {
+          setReadResult({
+            type: 'error',
+            title: 'Lỗi Kết Nối',
+            message: 'Không thể gửi yêu cầu đến máy chủ kho hàng.'
+          });
+        });
+    };
+
+    const handleRandom = () => {
+      const delta = Math.floor(Math.random() * 41) - 20;
+      setDeltaValue(String(delta));
+    };
+
+    const handleProxyWrite = () => {
+      const delta = parseInt(deltaValue, 10);
+      if (isNaN(delta)) {
+        setReadResult({ type: 'error', title: 'Lỗi', message: 'Vui lòng nhập số hợp lệ' });
+        return;
+      }
+      
+      fetch('/proxy_write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sku: selectedSku, delta })
+      })
+      .then(res => res.json().then(data => ({status: res.status, body: data})))
+      .then(({status, body}) => {
+        if (status === 200) {
+          setReadResult({ type: 'success', title: 'Ghi thành công', message: `Giao dịch TX-${body.tx_id} đã được gửi đến Coordinator.` });
+        } else {
+          setReadResult({ type: 'error', title: 'Giao dịch thất bại', message: body.error || 'Unknown error' });
         }
+      })
+      .catch(err => setReadResult({ type: 'error', title: 'Lỗi', message: 'Không thể kết nối' }));
     };
 
-    const handleCrash = async () => {
-        try {
-            await fetch("/crash", { method: 'POST' });
-            fetchState();
-        } catch (e) { console.error(e); }
-    };
-
-    const handleRecover = async () => {
-        try {
-            await fetch("/recover", { method: 'POST' });
-            fetchState();
-        } catch (e) { console.error(e); }
-    };
-
-    const getStatusBadge = () => {
-        if(isUp) return <div className="px-3 py-1 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 font-bold text-sm flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div> ONLINE</div>;
-        if(isDown) return <div className="px-3 py-1 rounded-full border border-red-200 bg-red-50 text-red-700 font-bold text-sm flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-red-500"></div> OFFLINE</div>;
-        if(isRecovering) return <div className="px-3 py-1 rounded-full border border-yellow-200 bg-yellow-50 text-yellow-700 font-bold text-sm flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-yellow-500"></div> RECOVERING... {Math.round(progress)}%</div>;
-    };
+    // Calculate displayed quantity based on selected SKU
+    let displayQty = '—';
+    if (nodeData && nodeData.dataset) {
+      const item = nodeData.dataset.find(x => x.SKU === selectedSku);
+      if (item) {
+        displayQty = item.Quantity;
+      }
+    }
 
     return (
-        <div className="min-h-screen p-4 md:p-8 flex flex-col items-center">
+      <div className="min-h-screen flex flex-col bg-slate-50">
+        
+        {/* Modal Thông Báo Đọc Dữ Liệu */}
+        {readResult && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-[fadeIn_0.2s_ease-out]">
+              <div className={`px-5 py-4 ${readResult.type === 'error' ? 'bg-red-50 border-b border-red-100' : 'bg-emerald-50 border-b border-emerald-100'} flex items-start gap-3`}>
+                <div className={`p-2 rounded-full ${readResult.type === 'error' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                  {readResult.type === 'error' 
+                    ? <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                    : <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                  }
+                </div>
+                <div className="flex-1 mt-1">
+                  <h3 className={`text-lg font-bold ${readResult.type === 'error' ? 'text-red-900' : 'text-emerald-900'}`}>{readResult.title}</h3>
+                  <p className={`text-sm mt-1 ${readResult.type === 'error' ? 'text-red-700' : 'text-emerald-700'}`}>{readResult.message}</p>
+                </div>
+              </div>
+              
+              {readResult.details && (
+                <div className="p-5 bg-slate-50 border-b border-slate-100">
+                  <div className="space-y-3">
+                    {readResult.details.map((d, i) => (
+                      <div key={i} className="flex justify-between items-center bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{d.label}</span>
+                        <span className="font-mono font-bold text-slate-800 text-base">{d.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              <div className="p-4 bg-white flex justify-end">
+                <button 
+                  onClick={() => setReadResult(null)}
+                  className="px-6 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors border border-slate-300"
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* HEADER */}
+        <header className="bg-white border-b border-slate-200 px-6 py-4 shadow-sm sticky top-0 z-40">
+          <div className="max-w-[1200px] mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold shadow-lg shadow-blue-500/30">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+              </div>
+              <div>
+                <h1 className="font-extrabold text-slate-800 text-lg leading-tight tracking-tight">Trạm Lưu Trữ: <span className="text-blue-600">{nodeId}</span></h1>
+                <p className="text-xs text-slate-500 font-medium">Hệ Thống Phân Tán</p>
+              </div>
+            </div>
             
-            {/* Top Navigation Links */}
-            <div className="w-full max-w-6xl flex justify-between items-center mb-8 bg-white shadow-sm p-2 px-4 rounded-xl border border-slate-200 backdrop-blur">
-                <div className="flex gap-2">
-                    <a href="http://localhost:5000" className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-700 text-sm font-bold transition-colors">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
-                        Back to Global Control Center
-                    </a>
+            <div className="flex items-center space-x-2 bg-slate-100 px-3 py-1.5 rounded-full border border-slate-200">
+              <div className={`w-2.5 h-2.5 rounded-full ${isOffline ? 'bg-slate-400' : isDown ? 'bg-red-500' : isRecovering ? 'bg-yellow-500 animate-pulse' : 'bg-emerald-500'}`}></div>
+              <span className={`text-xs font-bold uppercase tracking-wider ${isOffline ? 'text-slate-500' : isDown ? 'text-red-600' : isRecovering ? 'text-yellow-600' : 'text-emerald-600'}`}>
+                {isOffline ? 'DISCONNECTED' : nodeData ? nodeData.status : 'CONNECTING...'}
+              </span>
+            </div>
+          </div>
+        </header>
+
+        {/* MAIN CONTENT */}
+        <main className="flex-1 max-w-[1200px] mx-auto w-full p-6">
+          
+          {isOffline && (
+            <div className="bg-red-50 border border-red-200 p-4 rounded-xl mb-6 flex items-start gap-3">
+              <svg className="w-6 h-6 text-red-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+              <div>
+                <h4 className="text-red-800 font-bold">Lỗi Kết Nối</h4>
+                <p className="text-red-600 text-sm">Không thể kết nối đến máy chủ kho hàng (Container có thể đã bị Stop).</p>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
+            
+            {/* CỘT TRÁI: THÔNG TIN HÀNG HÓA (7 cols) */}
+            <div className="lg:col-span-7 bg-white shadow-sm border border-slate-200 rounded-2xl p-5 relative overflow-hidden flex flex-col">
+              <div className="absolute -bottom-10 -right-4 text-[120px] font-black text-slate-50 select-none z-0 pointer-events-none">
+                {nodeId}
+              </div>
+              
+              <div className="relative z-10 flex flex-col flex-1">
+                <h2 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                  <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path></svg>
+                  Tồn Kho Hiện Tại
+                </h2>
+                
+                <div className="mb-5 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                  <label className="text-xs text-slate-500 font-bold mb-1.5 block uppercase">Mặt hàng thao tác (SKU)</label>
+                  <select 
+                    className="w-full bg-white border border-slate-300 text-slate-800 font-medium rounded-lg p-2.5 outline-none focus:border-blue-500 transition-colors"
+                    value={selectedSku}
+                    onChange={(e) => setSelectedSku(e.target.value)}
+                    disabled={!nodeData || !nodeData.dataset}
+                  >
+                    {(nodeData && nodeData.dataset && nodeData.dataset.length > 0) 
+                      ? nodeData.dataset.map(item => (
+                          <option key={item.SKU} value={item.SKU}>{item.SKU} (Kho: {item.WarehouseID})</option>
+                        ))
+                      : <option value="SKU0001">Đang tải...</option>
+                    }
+                  </select>
                 </div>
-                <div className="flex gap-2">
-                    <span className="px-4 py-1.5 rounded-lg text-sm font-bold border bg-slate-800 border-slate-800 text-white shadow-sm">
-                        Cổng Kho {nodeId}
-                    </span>
+
+                <div className="flex-1 bg-slate-50 rounded-xl border border-slate-200 flex flex-col items-center justify-center p-8">
+                  <div className={`text-7xl font-black mono ${isDown ? 'text-red-500' : isRecovering ? 'text-yellow-500' : 'text-emerald-500'}`}>
+                    {displayQty}
+                  </div>
+                  <div className="text-sm text-slate-500 mt-2 font-bold uppercase tracking-widest">Sản Phẩm Tồn Kho</div>
                 </div>
+              </div>
             </div>
 
-            <div className="w-full max-w-6xl animate-slide-in">
-                {/* Header */}
-                <div className={`w-full rounded-2xl border border-slate-200 bg-white shadow-sm p-6 mb-6 flex justify-between items-center ${isUp ? 'glow-theme' : isRecovering ? 'recovering-pulse' : 'border-red-200 glow-red'}`}>
-                    <div className="flex items-center gap-4">
-                        <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl font-black bg-theme-grad border border-slate-200 text-slate-800 shadow-sm">
-                            {nodeId}
-                        </div>
-                        <div>
-                            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Kho <span className="text-theme">{nodeId}</span></h1>
-                            <p className="text-slate-500 font-mono text-sm mt-1 font-medium">Cổng Máy chủ Cục bộ (Port 500{nodeId === 'A' ? 1 : nodeId === 'B' ? 2 : 3})</p>
-                        </div>
+            {/* CỘT PHẢI: ĐIỀU KHIỂN & TRẠNG THÁI (5 cols) */}
+            <div className="lg:col-span-5 bg-white shadow-sm border border-slate-200 rounded-2xl p-5 flex flex-col justify-between">
+              <div>
+                <h2 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                  <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+                  Bảng Điều Khiển
+                </h2>
+                
+                <div className="space-y-4 mb-6">
+                  <div className="flex justify-between items-center p-4 bg-slate-50 rounded-xl border border-slate-200">
+                    <span className="text-sm font-bold text-slate-500 uppercase">Giao Dịch Cuối (TX)</span>
+                    <span className="font-mono text-blue-600 font-bold text-lg">{nodeData ? `TX-${String(nodeData.lastTxId).padStart(3, '0')}` : '—'}</span>
+                  </div>
+                  {isRecovering && nodeData && (
+                    <div className="p-4 bg-yellow-50/50 rounded-xl border border-yellow-200">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs font-bold text-yellow-700 uppercase">Khôi phục (Catch-up)</span>
+                        <span className="text-xs font-bold text-yellow-700 font-mono">{nodeData.recoverProgress ? nodeData.recoverProgress.toFixed(0) : 0}%</span>
+                      </div>
+                      <div className="w-full bg-yellow-100 rounded-full h-2 overflow-hidden">
+                        <div className="bg-yellow-500 h-2 transition-all duration-300" style={{ width: `${nodeData.recoverProgress || 0}%` }}></div>
+                      </div>
                     </div>
-                    <div>{getStatusBadge()}</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-col space-y-3">
+                <div className="flex gap-2">
+                  <input 
+                    type="number" 
+                    placeholder="Nhập Delta..." 
+                    className="flex-1 bg-slate-50 border border-slate-200 text-slate-800 font-medium rounded-xl px-3 py-2.5 outline-none focus:border-blue-500 transition-colors text-sm"
+                    value={deltaValue}
+                    onChange={(e) => setDeltaValue(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleProxyWrite()}
+                    disabled={isDown || isOffline}
+                  />
+                  <button onClick={handleRandom} title="Tạo số ngẫu nhiên" disabled={isDown || isOffline}
+                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 transition-colors font-bold text-base flex items-center justify-center disabled:opacity-50">
+                    🎲
+                  </button>
+                  <button onClick={handleProxyWrite} disabled={isDown || isOffline}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl transition-colors flex items-center disabled:opacity-50 shadow-md shadow-blue-500/20">
+                    Ghi
+                  </button>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Left Column: Controls */}
-                    <div className="space-y-6">
-                        {/* Status Controls */}
-                        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 shadow-sm">
-                            <h2 className="text-sm font-bold uppercase tracking-widest text-slate-500 mb-4">Quản lý Vòng đời Kho</h2>
-                            <div className="grid grid-cols-2 gap-3">
-                                <button onClick={handleCrash} disabled={!isUp} className="py-2.5 rounded-lg bg-red-50 border border-red-200 text-red-600 font-semibold hover:bg-red-100 disabled:opacity-50 transition-colors shadow-sm">
-                                    Tắt Server
-                                </button>
-                                <button onClick={handleRecover} disabled={!isDown} className="py-2.5 rounded-lg bg-yellow-50 border border-yellow-200 text-yellow-600 font-semibold hover:bg-yellow-100 disabled:opacity-50 transition-colors shadow-sm">
-                                    Mở Server
-                                </button>
-                            </div>
-                        </div>
+                <button 
+                  onClick={handleLocalRead}
+                  disabled={isOffline}
+                  className="w-full py-3 rounded-xl font-bold text-sm bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors flex items-center justify-center disabled:opacity-50"
+                >
+                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+                  Truy Vấn (Đọc cục bộ)
+                </button>
 
-                        {/* Inventory Writer */}
-                        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 shadow-sm">
-                            <h2 className="text-sm font-bold uppercase tracking-widest text-slate-500 mb-4">Giao dịch Ghi</h2>
-                            
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="text-xs text-slate-600 font-bold uppercase mb-1 block">Chọn mặt hàng (SKU)</label>
-                                    <select value={selectedSku} onChange={e=>setSelectedSku(e.target.value)} disabled={!isUp} className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-slate-800 mono font-semibold text-sm outline-none focus:border-theme shadow-sm">
-                                        {dataset.map(item => (
-                                            <option key={item.SKU} value={item.SKU}>{item.SKU} (Tồn kho: {item.Quantity})</option>
-                                        ))}
-                                    </select>
-                                </div>
-
-                                <div>
-                                    <label className="text-xs text-slate-600 font-bold uppercase mb-1 block">Số lượng thay đổi (Delta)</label>
-                                    <div className="flex gap-2">
-                                        <button onClick={()=>setTxAmt(p=>p-1)} className="w-11 h-11 rounded-lg bg-white border border-slate-300 flex items-center justify-center hover:bg-slate-50 transition-colors font-bold text-slate-700 shadow-sm">-</button>
-                                        <input type="number" value={txAmt} onChange={e=>setTxAmt(parseInt(e.target.value)||0)} className="flex-1 bg-white border border-slate-300 rounded-lg text-center text-slate-800 mono font-bold text-lg outline-none focus:border-theme shadow-sm"/>
-                                        <button onClick={()=>setTxAmt(p=>p+1)} className="w-11 h-11 rounded-lg bg-white border border-slate-300 flex items-center justify-center hover:bg-slate-50 transition-colors font-bold text-slate-700 shadow-sm">+</button>
-                                    </div>
-                                </div>
-
-                                <button onClick={handleWrite} className="w-full py-3 rounded-xl btn-theme text-white font-bold tracking-wide transition-all uppercase text-sm mt-3">
-                                    Thực hiện Ghi
-                                </button>
-                                
-                                {uiMsg && (
-                                    <div className={`mt-3 p-3 rounded-lg text-sm font-medium animate-slide-in ${
-                                        uiMsg.type === 'error' ? 'bg-red-100 text-red-700 border border-red-200' : 
-                                        uiMsg.type === 'warning' ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' :
-                                        'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                                    }`}>
-                                        {uiMsg.text}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Middle Column: Local Database */}
-                    <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-5 flex flex-col h-[600px]">
-                        <div className="flex justify-between items-end mb-4">
-                            <div>
-                                <h2 className="text-sm font-bold uppercase tracking-widest text-slate-500">Cơ sở Dữ liệu Cục bộ</h2>
-                                <p className="text-xs text-slate-500 mt-1 font-medium">Bản sao bộ nhớ ({dataset.length} mặt hàng)</p>
-                            </div>
-                            <div className="text-right">
-                                <p className="text-xs text-slate-500 font-bold">Giao dịch cuối</p>
-                                <p className="mono font-bold text-theme">TX-{String(lastTx).padStart(3, '0')}</p>
-                            </div>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto pr-2">
-                            <table className="w-full text-left border-collapse">
-                                <thead className="sticky top-0 bg-white/95 backdrop-blur z-10 text-xs uppercase text-slate-500 font-bold border-b border-slate-200">
-                                    <tr>
-                                        <th className="pb-2">SKU</th>
-                                        <th className="pb-2 text-right">Số lượng</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {dataset.length === 0 ? (
-                                        <tr><td colSpan="2" className="text-center py-8 text-slate-400 italic font-medium">Không có dữ liệu (Offline)</td></tr>
-                                    ) : (
-                                        dataset.slice(0, 50).map(item => (
-                                            <tr key={item.SKU} className="border-b border-slate-100 hover:bg-slate-50 transition-colors group">
-                                                <td className="py-2.5 mono text-sm font-bold text-slate-600 group-hover:text-slate-900">{item.SKU}</td>
-                                                <td className="py-2.5 mono text-sm text-right font-bold text-emerald-600">{item.Quantity}</td>
-                                            </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    {/* Right Column: Local WAL */}
-                    <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-5 flex flex-col h-[600px]">
-                        <div>
-                            <h2 className="text-sm font-bold uppercase tracking-widest text-slate-500">Nhật ký Ghi chú (WAL)</h2>
-                            <p className="text-xs text-slate-500 mt-1 font-medium">wal.jsonl ({wal.length} bản ghi)</p>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto mt-4 space-y-2 pr-2">
-                            {wal.length === 0 ? (
-                                <div className="text-center py-8 text-slate-400 italic font-medium">Nhật ký trống</div>
-                            ) : (
-                                [...wal].reverse().map((entry, idx) => (
-                                    <div key={idx} className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs mono shadow-sm">
-                                        <div className="flex justify-between items-center mb-1">
-                                            <span className="font-bold text-theme">TX-{String(entry.tx_id).padStart(3, '0')}</span>
-                                            <span className="text-slate-500 font-medium">{new Date(entry.timestamp * 1000).toLocaleTimeString()}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between mt-2">
-                                            <span className="text-slate-700 font-bold">{entry.sku}</span>
-                                            <div className="flex gap-2 items-center">
-                                                <span className="text-slate-400 line-through font-semibold">{entry.old_qty}</span>
-                                                <span className="text-emerald-500">→</span>
-                                                <span className="text-emerald-600 font-bold">{entry.new_qty}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    </div>
-
-                </div>
+                {!isDown ? (
+                  <button 
+                    onClick={handleCrash}
+                    className="w-full py-3 rounded-xl font-bold text-sm bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 transition-colors flex items-center justify-center"
+                  >
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    Sập Nguồn (Crash)
+                  </button>
+                ) : (
+                  <button 
+                    onClick={handleRecover}
+                    className="w-full py-3 rounded-xl font-bold text-sm bg-yellow-400 text-yellow-900 hover:bg-yellow-500 shadow-md shadow-yellow-500/20 transition-all flex items-center justify-center animate-pulse"
+                  >
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    Khởi Động & Khôi Phục
+                  </button>
+                )}
+              </div>
             </div>
-        </div>
+          </div>
+
+          {/* BẢNG LOG WAL */}
+          <div className="bg-white shadow-sm border border-slate-200 rounded-2xl overflow-hidden flex flex-col">
+            <div className="px-5 py-4 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+              <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+              <h2 className="text-sm font-bold text-slate-800">Nhật Ký Giao Dịch (WAL)</h2>
+              <span className="ml-auto mono text-xs text-slate-500 bg-slate-200 px-2 py-0.5 rounded-full">
+                {walData.length} bản ghi
+              </span>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 max-h-[300px]">
+              {walData.length === 0 ? (
+                <div className="text-center py-8 text-slate-400 text-sm font-medium">Chưa có giao dịch (WAL trống)</div>
+              ) : (
+                <div className="space-y-2">
+                  {walData.slice().reverse().map((entry, idx) => {
+                    const delta = entry.new_qty - entry.old_qty;
+                    const date = new Date(entry.timestamp * 1000).toLocaleTimeString();
+                    return (
+                      <div key={idx} className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex items-center justify-between hover:border-blue-200 transition-colors">
+                        <div className="flex flex-col">
+                          <span className="mono text-xs font-bold text-slate-700">TX-{String(entry.tx_id).padStart(3, '0')}</span>
+                          <span className="mono text-[10px] text-slate-400">{date}</span>
+                        </div>
+                        <div className="mono text-xs font-bold text-slate-700 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100 flex items-center">
+                          <span className="mr-3">{entry.sku}</span>
+                          <span className="text-red-500 line-through mr-1 font-normal">{entry.old_qty}</span>
+                          <span className="text-slate-400 font-normal">→</span>
+                          <span className="text-emerald-600 ml-1">{entry.new_qty}</span>
+                          <span className={`ml-3 text-[10px] px-1.5 py-0.5 rounded-sm ${delta > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                            {delta > 0 ? '+'+delta : delta}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </main>
+      </div>
     );
-};
+  };
 
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<NodePortal />);
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<App />);
 </script>
 </body>
 </html>
