@@ -20,7 +20,7 @@ STOCK_FILE = os.path.join(DATA_DIR, "stock.json")
 WAL_FILE = os.path.join(DATA_DIR, "wal.jsonl")
 
 # Standard Initial State
-state = "UP"  # UP, DOWN, RECOVERING
+state = "RECOVERING"  # UP, DOWN, RECOVERING
 stock = []  # Relational dataset: List of {"SKU": str, "Quantity": int, "WarehouseID": str}
 last_tx_id = 0
 recover_progress = 0.0
@@ -261,7 +261,7 @@ def proxy_write():
     """Proxy endpoint for Node UI to send writes to the Coordinator."""
     coordinator_url = os.environ.get("COORDINATOR_URL", "http://coordinator:5000")
     try:
-        resp = requests.post(f"{coordinator_url}/api/write", json=request.json, timeout=2.0)
+        resp = requests.post(f"{coordinator_url}/api/write", json=request.json, timeout=10.0)
         return jsonify(resp.json()), resp.status_code
     except Exception as e:
         log(f"Proxy write to coordinator failed: {e}", "WARNING")
@@ -283,16 +283,23 @@ def run_recovery_process():
     
     # 1. Ask coordinator for missed transactions while this node was down
     missed_txs = []
-    try:
-        # Coordinator container name is "coordinator" in docker-compose rowa-network
-        response = requests.get(f"http://coordinator:5000/api/missed-txs?node_id={NODE_ID}", timeout=5)
-        if response.status_code == 200:
-            missed_txs = response.json().get("missed_txs", [])
-            log(f"Fetched {len(missed_txs)} missed transactions from Coordinator.", "INFO")
-        else:
-            log("Failed to fetch missed transactions, response code error.", "WARNING")
-    except Exception as e:
-        log(f"Coordinator unreachable during recovery: {e}", "WARNING")
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            # Coordinator container name is "coordinator" in docker-compose rowa-network
+            response = requests.get(f"http://coordinator:5000/api/missed-txs?node_id={NODE_ID}", timeout=5)
+            if response.status_code == 200:
+                missed_txs = response.json().get("missed_txs", [])
+                log(f"Fetched {len(missed_txs)} missed transactions from Coordinator.", "INFO")
+                break
+            else:
+                log(f"Failed to fetch missed txs, HTTP {response.status_code}", "WARNING")
+        except Exception as e:
+            if attempt < max_retries - 1:
+                log(f"Coordinator unreachable, retrying in 2s... ({e})", "WARNING")
+                time.sleep(2)
+            else:
+                log(f"Coordinator completely unreachable during recovery: {e}", "ERROR")
 
     # 2. Simulate WAL catch-up progress bar (4.5s total time, increments every 90ms)
     steps = 50
@@ -375,5 +382,9 @@ def reset_node():
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     load_db()
+    
+    # Kích hoạt tiến trình Recovery ngầm ngay khi khởi động container (Hard Crash Recovery)
+    threading.Thread(target=run_recovery_process, daemon=True).start()
+    
     log(f"Starting server on port {PORT}...")
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)

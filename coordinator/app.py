@@ -67,6 +67,8 @@ def save_state():
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FRONTEND ROUTING
+import concurrent.futures
+
 # ─────────────────────────────────────────────────────────────────────────────
 @app.route("/")
 def serve_index():
@@ -84,7 +86,7 @@ def get_system_status():
     node_statuses = {}
     for nid, url in NODES.items():
         try:
-            resp = requests.get(f"{url}/status", timeout=1.5)
+            resp = requests.get(f"{url}/status", timeout=0.3)
             if resp.status_code == 200:
                 node_statuses[nid] = resp.json()
             else:
@@ -117,20 +119,27 @@ def write_transaction():
         
     log(f"📤 COORDINATOR: Bắt đầu Write Transaction TX-{curr_tx:03d} | {sku} delta: {delta:+}", "INFO")
     
-    # 1. Identify which nodes are currently available (UP)
+    # 1. Identify which nodes are currently available (UP) concurrently
     available_nodes = []
     down_nodes = []
     
-    for nid, url in NODES.items():
+    def check_node(nid, url):
         try:
-            resp = requests.get(f"{url}/status", timeout=1.0)
-            # Must check if the node's internal state is UP
+            resp = requests.get(f"{url}/status", timeout=0.5)
             if resp.status_code == 200 and resp.json().get("status") in ["UP", "SYNCED"]:
+                return (nid, True)
+            return (nid, False)
+        except Exception:
+            return (nid, False)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(NODES)) as executor:
+        futures = [executor.submit(check_node, nid, url) for nid, url in NODES.items()]
+        for future in concurrent.futures.as_completed(futures):
+            nid, is_up = future.result()
+            if is_up:
                 available_nodes.append(nid)
             else:
                 down_nodes.append(nid)
-        except Exception:
-            down_nodes.append(nid)
             
     if not available_nodes:
         log("❌ No nodes available! Transaction aborted.", "ERROR")
@@ -145,33 +154,36 @@ def write_transaction():
     if down_nodes:
         log(f"⚠️ Down nodes (will bypass & log): {down_nodes}", "WARNING")
         
-    # 2. Write to all available nodes concurrently (or sequentially for simple reliable HTTP execution)
+    # 2. Write to all available nodes concurrently
     committed_nodes = []
     failed_nodes = []
     
     committed_old_qty = None
     committed_new_qty = None
     
-    for nid in available_nodes:
+    def write_to_node(nid):
         url = NODES[nid]
         try:
-            payload = {
-                "tx_id": curr_tx,
-                "sku": sku,
-                "delta": delta
-            }
+            payload = {"tx_id": curr_tx, "sku": sku, "delta": delta}
             resp = requests.post(f"{url}/write", json=payload, timeout=2.0)
             if resp.status_code == 200 and resp.json().get("status") == "COMMITTED":
-                committed_nodes.append(nid)
-                if committed_new_qty is None:
-                    # Lấy số lượng mới từ Node đầu tiên trả về thành công
-                    committed_old_qty = resp.json().get("old_qty", 0)
-                    committed_new_qty = resp.json().get("new_qty", 0)
-            else:
-                failed_nodes.append(nid)
+                return (nid, True, resp.json().get("old_qty", 0), resp.json().get("new_qty", 0))
+            return (nid, False, 0, 0)
         except Exception as e:
             log(f"Error writing to node {nid}: {e}", "WARNING")
-            failed_nodes.append(nid)
+            return (nid, False, 0, 0)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(available_nodes)) as executor:
+        futures = [executor.submit(write_to_node, nid) for nid in available_nodes]
+        for future in concurrent.futures.as_completed(futures):
+            nid, success, old_q, new_q = future.result()
+            if success:
+                committed_nodes.append(nid)
+                if committed_new_qty is None:
+                    committed_old_qty = old_q
+                    committed_new_qty = new_q
+            else:
+                failed_nodes.append(nid)
             
     # Treat failed writes as down nodes for recovery log
     all_down_or_failed = list(set(down_nodes + failed_nodes))
