@@ -187,7 +187,7 @@ def read_data():
             return jsonify({"error": "Service Unavailable. Node is DOWN."}), 503
             
         # ★ STALE READ PREVENTION ★
-        # Ref: Özsu & Valduriez §14.5.3 - recovering site must NOT serve reads
+        # Recovering site must NOT serve reads
         if state == "RECOVERING":
             log("Read request REJECTED! Stale Read Prevented.", "ERROR")
             return jsonify({

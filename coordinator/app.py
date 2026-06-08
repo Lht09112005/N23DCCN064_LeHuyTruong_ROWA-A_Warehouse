@@ -150,7 +150,7 @@ def write_transaction():
             "error": "No nodes available to commit transaction"
         }), 503
         
-    log(f"[ROWA-A §14.4] Available nodes to write: {available_nodes}", "INFO")
+    log(f"Available nodes to write: {available_nodes}", "INFO")
     if down_nodes:
         log(f"⚠️ Down nodes (will bypass & log): {down_nodes}", "WARNING")
         
